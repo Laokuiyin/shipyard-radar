@@ -30,6 +30,9 @@ def build_parser() -> argparse.ArgumentParser:
     export = sub.add_parser("export", help="生成 Excel")
     export.add_argument("--output", type=Path)
     sub.add_parser("daily", help="执行每日采集、抽取与导出")
+    web = sub.add_parser("web", help="启动网页看板")
+    web.add_argument("--host")
+    web.add_argument("--port", type=int)
     sub.add_parser("stats", help="显示数据统计")
     return parser
 
@@ -63,6 +66,14 @@ def main() -> None:
     elif args.command == "daily":
         collected, extracted, output = pipeline.run_daily()
         print({"collect": collected, "extract": extracted, "output": str(output)})
+    elif args.command == "web":
+        import uvicorn
+
+        uvicorn.run(
+            "shipwatch.web:app",
+            host=args.host or settings.web_host,
+            port=args.port or settings.web_port,
+        )
     elif args.command == "stats":
         print(
             {
@@ -77,4 +88,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

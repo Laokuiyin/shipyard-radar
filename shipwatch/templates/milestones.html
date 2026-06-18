@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="panel">
+  <div class="panel-head"><div><p class="eyebrow">TIMELINE</p><h2>项目里程碑</h2></div><span class="count">{{ rows|length }} 条</span></div>
+  <div class="table-wrap"><table>
+    <thead><tr><th>日期</th><th>船厂</th><th>船东 / 项目</th><th>船型</th><th>节点</th><th>属性</th><th>原文证据</th><th>来源</th></tr></thead>
+    <tbody>{% for row in rows %}<tr>
+      <td>{{ row.event_date or '—' }}</td><td class="yard">{{ row.yard }}</td><td>{{ row.owner_project or '—' }}</td>
+      <td>{{ row.ship_type or '—' }}</td><td><span class="badge progress">{{ row.label }}</span></td>
+      <td>{{ '预计' if row.is_expected else '实际/报道' }}</td><td class="evidence">{{ row.evidence or '—' }}</td>
+      <td><a class="source-link" target="_blank" rel="noopener" href="{{ row.url }}">{{ row.title }}</a></td>
+    </tr>{% else %}<tr><td colspan="8" class="empty">暂无里程碑</td></tr>{% endfor %}</tbody>
+  </table></div>
+</section>
+{% endblock %}

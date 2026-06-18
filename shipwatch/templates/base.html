@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block page_title %}{{ title }}{% endblock %}</title>
+  <link rel="stylesheet" href="{{ url_for('static', path='/app.css') }}">
+</head>
+<body>
+  <header class="topbar">
+    <div>
+      <p class="eyebrow">SHIPYARD INTELLIGENCE</p>
+      <h1>{{ title }}</h1>
+    </div>
+    <nav>
+      <a class="{{ 'active' if active == 'projects' else '' }}" href="/">项目</a>
+      <a class="{{ 'active' if active == 'milestones' else '' }}" href="/milestones">里程碑</a>
+      <a class="{{ 'active' if active == 'sources' else '' }}" href="/sources">来源明细</a>
+      <a class="{{ 'active' if active == 'source_status' else '' }}" href="/source-status">采集状态</a>
+    </nav>
+  </header>
+  <main>{% block content %}{% endblock %}</main>
+  <footer>数据仅来自配置的企业官网与官方微信公众号 · 自动抽取结果请结合原文复核</footer>
+</body>
+</html>

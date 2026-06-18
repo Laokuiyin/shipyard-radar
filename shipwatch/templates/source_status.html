@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="panel">
+  <div class="panel-head"><div><p class="eyebrow">COLLECTOR HEALTH</p><h2>来源采集状态</h2></div></div>
+  <div class="legend"><span><i class="dot good"></i>成功</span><span><i class="dot partial"></i>发现成功 / 正文失败</span><span><i class="dot bad"></i>整体失败</span></div>
+  <div class="status-grid">
+  {% for row in rows %}
+    <article class="status-card {{ 'bad' if row.status == '失败' else ('partial' if '正文获取失败' in row.status else 'good') }}">
+      <div><p class="eyebrow">{{ row.channel }}</p><h3>{{ row.yard }}</h3></div>
+      <span class="badge">{{ row.status }}</span>
+      <dl>
+        <dt>发现数量</dt><dd>{{ row.result_count if row.result_count is not none else '—' }}</dd>
+        <dt>最后执行</dt><dd>{{ row.last_attempt_at[:19].replace('T', ' ') if row.last_attempt_at else '—' }}</dd>
+        <dt>失败原因</dt><dd>{{ row.error or '—' }}</dd>
+      </dl>
+    </article>
+  {% endfor %}
+  </div>
+</section>
+{% endblock %}

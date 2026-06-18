@@ -1,0 +1,16 @@
+[Unit]
+Description=Shipyard Radar Web Dashboard
+After=network.target
+
+[Service]
+Type=simple
+User=shipwatch
+Group=shipwatch
+WorkingDirectory=/opt/shipyard-radar
+EnvironmentFile=/opt/shipyard-radar/.env
+ExecStart=/opt/shipyard-radar/.venv/bin/shipwatch web --host 127.0.0.1 --port 8080
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

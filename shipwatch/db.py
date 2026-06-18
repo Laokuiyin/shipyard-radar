@@ -235,3 +235,51 @@ class Database:
         with self.connect() as conn:
             row = conn.execute(sql, params).fetchone()
             return row[0] if row else None
+
+    def project_rows(
+        self,
+        yard: str | None = None,
+        progress: str | None = None,
+        review_status: str | None = None,
+        query: str | None = None,
+    ) -> list[sqlite3.Row]:
+        conditions = ["1=1"]
+        params: list[object] = []
+        if yard:
+            conditions.append("p.yard=?")
+            params.append(yard)
+        if progress:
+            conditions.append("COALESCE(p.current_progress, '')=?")
+            params.append(progress)
+        if review_status:
+            conditions.append("p.review_status=?")
+            params.append(review_status)
+        if query:
+            conditions.append(
+                """
+                (COALESCE(p.owner_project, '') LIKE ? OR COALESCE(p.ship_type, '') LIKE ?
+                 OR COALESCE(p.series_identifier, '') LIKE ? OR COALESCE(a.title, '') LIKE ?)
+                """
+            )
+            params.extend([f"%{query}%"] * 4)
+        return self.query(
+            f"""
+            SELECT p.*,
+              a.title AS source_title, a.url AS source_url, a.published_at,
+              (SELECT GROUP_CONCAT(label || COALESCE('：' || event_date, ''), '；')
+               FROM milestones m WHERE m.project_id=p.id) AS milestones_text
+            FROM projects p
+            LEFT JOIN project_sources ps ON ps.project_id=p.id
+            LEFT JOIN articles a ON a.id=ps.article_id
+            WHERE ps.article_id=(
+              SELECT MAX(ps2.article_id) FROM project_sources ps2 WHERE ps2.project_id=p.id
+            ) AND {" AND ".join(conditions)}
+            ORDER BY
+              CASE p.current_progress
+                WHEN '开工' THEN 1 WHEN '铺龙骨' THEN 2 WHEN '下水/出坞' THEN 3
+                WHEN '试航' THEN 4 WHEN '交付/完工' THEN 5 ELSE 6
+              END,
+              COALESCE(p.start_date, p.last_seen_at) DESC
+            """,
+            tuple(params),
+        )
