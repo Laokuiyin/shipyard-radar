@@ -107,8 +107,8 @@ class Pipeline:
         source_names = {source.id: source.yard for source in self.settings.sources}
         return ExcelExporter(self.db, source_names).export(output_path, changed_since=start)
 
-    def run_daily(self) -> tuple[dict[str, int], dict[str, int], Path]:
+    def run_daily(self) -> tuple[dict[str, int], dict[str, int]]:
         since = date.today() - timedelta(days=14)
         collected = self.discover_and_collect(since=since)
         extracted = self.extract_pending()
-        return collected, extracted, self.export()
+        return collected, extracted

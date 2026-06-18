@@ -64,8 +64,8 @@ def main() -> None:
     elif args.command == "export":
         print(pipeline.export(args.output))
     elif args.command == "daily":
-        collected, extracted, output = pipeline.run_daily()
-        print({"collect": collected, "extract": extracted, "output": str(output)})
+        collected, extracted = pipeline.run_daily()
+        print({"collect": collected, "extract": extracted})
     elif args.command == "web":
         import uvicorn
 

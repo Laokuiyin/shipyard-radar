@@ -64,13 +64,18 @@ OPENAI_API_MODE=chat_completions
 .venv/bin/shipwatch daily
 ```
 
+每日任务直接更新 SQLite，网页会即时读取最新数据；只有手工执行
+`.venv/bin/shipwatch export` 时才生成 Excel。
+
 启动网页：
 
 ```bash
 .venv/bin/shipwatch web --host 127.0.0.1 --port 8080
 ```
 
-访问 `http://127.0.0.1:8080`。生产环境建议使用 `deploy/shipwatch-web.service` 和 `deploy/shipwatch-nginx.conf`，由 Nginx 反向代理，不直接暴露 Uvicorn。
+访问 `http://127.0.0.1:8080`。当前云主机部署示例由
+`deploy/shipwatch-web.service` 直接监听 `7890` 端口；如以后配置域名和
+HTTPS，再使用 `deploy/shipwatch-nginx.conf` 反向代理。
 
 只测试官网或公众号：
 
