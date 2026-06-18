@@ -1,0 +1,181 @@
+from __future__ import annotations
+
+from datetime import datetime
+
+from shipwatch.db import Database
+from shipwatch.domain import Extraction
+from shipwatch.text import compact_name, iso_date
+
+
+PROGRESS_RANK = {
+    "签约/立项": 10,
+    "开工": 20,
+    "铺龙骨": 30,
+    "下水/出坞": 40,
+    "试航": 50,
+    "交付/完工": 60,
+}
+
+
+def project_key(extraction: Extraction, article_id: int) -> str:
+    parts = [
+        compact_name(extraction.yard),
+        compact_name(extraction.owner_project),
+        compact_name(extraction.ship_type),
+        compact_name(extraction.series_identifier),
+    ]
+    stable = "|".join(parts)
+    if sum(bool(part) for part in parts[1:]) < 2:
+        return f"{parts[0]}|article:{article_id}"
+    return stable
+
+
+class ProjectMerger:
+    def __init__(self, db: Database):
+        self.db = db
+
+    def merge(self, article_id: int, extraction: Extraction) -> int | None:
+        if not extraction.relevant or not extraction.yard:
+            return None
+        key = project_key(extraction, article_id)
+        now = datetime.now().isoformat()
+        with self.db.connect() as conn:
+            existing = conn.execute("SELECT * FROM projects WHERE project_key=?", (key,)).fetchone()
+            review_status = "已确认" if extraction.confidence >= 0.82 and not extraction.review_reason else "待复核"
+            if existing:
+                conflicts = []
+                incoming_ship_count = extraction.ship_count
+                incoming_ship_type = extraction.ship_type
+                if (
+                    extraction.ship_count is not None
+                    and existing["ship_count"] is not None
+                    and extraction.ship_count != existing["ship_count"]
+                ):
+                    conflicts.append(
+                        f"船数冲突：原记录{existing['ship_count']}艘，新来源{extraction.ship_count}艘"
+                    )
+                    incoming_ship_count = None
+                if (
+                    extraction.ship_type
+                    and existing["ship_type"]
+                    and compact_name(extraction.ship_type) != compact_name(existing["ship_type"])
+                ):
+                    conflicts.append(
+                        f"船型冲突：原记录“{existing['ship_type']}”，新来源“{extraction.ship_type}”"
+                    )
+                    incoming_ship_type = None
+                if conflicts:
+                    review_status = "待复核"
+                    extraction.review_reason = "；".join(
+                        item
+                        for item in (extraction.review_reason, *conflicts)
+                        if item
+                    )
+                current = existing["current_progress"]
+                incoming = extraction.current_progress
+                progress = (
+                    incoming
+                    if PROGRESS_RANK.get(incoming, 0) >= PROGRESS_RANK.get(current, 0)
+                    else current
+                )
+                changed = any(
+                    (
+                        extraction.owner_project and extraction.owner_project != existing["owner_project"],
+                        extraction.ship_type and extraction.ship_type != existing["ship_type"],
+                        extraction.ship_count and extraction.ship_count != existing["ship_count"],
+                        progress != current,
+                        extraction.start_date and iso_date(extraction.start_date) != existing["start_date"],
+                        extraction.completion_date
+                        and iso_date(extraction.completion_date) != existing["completion_date"],
+                    )
+                )
+                conn.execute(
+                    """
+                    UPDATE projects SET
+                      owner_project=COALESCE(?, owner_project),
+                      ship_type=COALESCE(?, ship_type),
+                      ship_count=COALESCE(?, ship_count),
+                      series_identifier=COALESCE(?, series_identifier),
+                      current_progress=?,
+                      start_date=COALESCE(?, start_date),
+                      completion_date=COALESCE(?, completion_date),
+                      confidence=MAX(confidence, ?),
+                      review_status=CASE WHEN ?='待复核' THEN '待复核' ELSE review_status END,
+                      review_reason=COALESCE(?, review_reason),
+                      last_seen_at=?,
+                      last_changed_at=CASE WHEN ? THEN ? ELSE last_changed_at END
+                    WHERE id=?
+                    """,
+                    (
+                        extraction.owner_project,
+                        incoming_ship_type,
+                        incoming_ship_count,
+                        extraction.series_identifier,
+                        progress,
+                        iso_date(extraction.start_date),
+                        iso_date(extraction.completion_date),
+                        extraction.confidence,
+                        review_status,
+                        extraction.review_reason,
+                        now,
+                        int(changed),
+                        now,
+                        existing["id"],
+                    ),
+                )
+                project_id = int(existing["id"])
+            else:
+                cursor = conn.execute(
+                    """
+                    INSERT INTO projects (
+                      project_key, yard, owner_project, ship_type, ship_count, series_identifier,
+                      current_progress, start_date, completion_date, confidence, review_status,
+                      review_reason, first_seen_at, last_seen_at, last_changed_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        key,
+                        extraction.yard,
+                        extraction.owner_project,
+                        extraction.ship_type,
+                        extraction.ship_count,
+                        extraction.series_identifier,
+                        extraction.current_progress,
+                        iso_date(extraction.start_date),
+                        iso_date(extraction.completion_date),
+                        extraction.confidence,
+                        review_status,
+                        extraction.review_reason,
+                        now,
+                        now,
+                        now,
+                    ),
+                )
+                project_id = int(cursor.lastrowid)
+
+            conn.execute(
+                """
+                INSERT INTO project_sources(project_id, article_id, confidence)
+                VALUES (?, ?, ?) ON CONFLICT(project_id, article_id) DO UPDATE SET
+                confidence=excluded.confidence
+                """,
+                (project_id, article_id, extraction.confidence),
+            )
+            for milestone in extraction.milestones:
+                conn.execute(
+                    """
+                    INSERT OR IGNORE INTO milestones(
+                      project_id, article_id, kind, label, event_date, is_expected, evidence
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        project_id,
+                        article_id,
+                        milestone.kind,
+                        milestone.label,
+                        iso_date(milestone.event_date),
+                        int(milestone.is_expected),
+                        milestone.evidence,
+                    ),
+                )
+            return project_id

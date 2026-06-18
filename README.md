@@ -1,0 +1,113 @@
+# 五家船厂新船项目采集系统
+
+定向采集沪东中华、江南造船、上海外高桥造船、厦门船舶重工、武昌船舶重工，以及中国船舶集团官方渠道中涉及这五家船厂的民用新船/海工项目动态。
+
+系统只接受企业官网和经白名单核验的官方微信公众号原文。搜狗微信仅用于发现公开文章，不会作为“消息来源”写入结果。
+
+## 功能
+
+- 官网固定域名巡检、列表翻页和正文提取。
+- 搜狗微信按官方公众号名称定向发现，文章落地页再次校验公众号名称。
+- 跟踪签约/立项、开工、铺龙骨、下水/出坞、试航、交付/完工。
+- 排除常见军用舰艇关键词。
+- SQLite 去重、断点续跑、项目合并和完整里程碑。
+- 没有模型密钥时使用本地规则；配置 OpenAI 兼容接口后启用结构化抽取。
+- 生成项目主表、今日新增与变更、项目里程碑、来源明细、待人工复核和来源采集状态六张工作表。
+- 支持人工补充官网或微信原文链接。
+
+## 安装
+
+```bash
+git clone <repository> /opt/shipwatch
+cd /opt/shipwatch
+python3.11 -m venv .venv
+.venv/bin/pip install -e .
+cp .env.example .env
+.venv/bin/shipwatch init
+```
+
+根据实际网络情况核验并调整 `config.yaml` 中的官网入口和公众号名称。密钥只写入 `.env`。
+
+## 模型配置
+
+默认使用 Responses API 风格的 OpenAI 兼容接口：
+
+```dotenv
+OPENAI_API_KEY=...
+OPENAI_BASE_URL=https://api.openai.com/v1
+OPENAI_MODEL=gpt-5-mini
+OPENAI_API_MODE=responses
+```
+
+如果兼容服务只实现 Chat Completions：
+
+```dotenv
+OPENAI_API_MODE=chat_completions
+```
+
+不配置 `OPENAI_API_KEY` 时，系统仍可运行，但复杂字段的准确率较低，结果更容易进入“待人工复核”。
+
+## 使用
+
+首次回溯近 12 个月：
+
+```bash
+.venv/bin/shipwatch collect --since 2025-06-18
+.venv/bin/shipwatch extract
+.venv/bin/shipwatch export
+```
+
+每日运行：
+
+```bash
+.venv/bin/shipwatch daily
+```
+
+只测试官网或公众号：
+
+```bash
+.venv/bin/shipwatch collect --website-only
+.venv/bin/shipwatch collect --wechat-only
+```
+
+人工补充原文链接：
+
+```bash
+.venv/bin/shipwatch add-url \
+  'https://mp.weixin.qq.com/s/ARTICLE_ID' \
+  --source hudong_zhonghua \
+  --title '文章标题'
+.venv/bin/shipwatch extract
+```
+
+来源 ID：`hudong_zhonghua`、`jiangnan`、`waigaoqiao`、`xiamen`、`wuchang`、`cssc_group`。
+
+## Linux 定时任务
+
+```bash
+chmod +x scripts/shipwatch-daily.sh
+crontab -e
+```
+
+参考 `deploy/shipwatch.cron.example`。确保服务器时区为 `Asia/Shanghai`，或按服务器时区换算 cron 时间。
+
+## 数据与输出
+
+- SQLite：`data/shipwatch.db`
+- Excel：`outputs/船厂新船项目_YYYY-MM-DD.xlsx`
+- 日志：`logs/daily.log`
+
+每条项目记录都带官网或微信公众号原文 URL。抓取失败、验证码、公众号不匹配、字段缺失和来源冲突会保留在来源明细或待复核表中，不会静默猜测。
+
+`来源采集状态` 会逐项列出各船厂官网和公众号的成功、部分失败、失败、未执行或“发现成功 / 正文获取失败”状态，以及最后执行时间、发现数量和规范化失败原因。
+
+## 公众号采集边界
+
+微信公众号没有稳定的公开文章列表 API。系统通过搜狗微信发现文章，并只接受最终跳转到 `mp.weixin.qq.com` 且公众号名称符合白名单的页面。若触发验证码，任务记录错误并继续处理其他来源，不尝试绕过验证；可以用 `add-url` 补充漏掉的官方原文。
+
+## 测试
+
+```bash
+.venv/bin/pip install -e '.[dev]'
+.venv/bin/pytest
+```

@@ -1,0 +1,105 @@
+app:
+  timezone: Asia/Shanghai
+  lookback_days: 365
+  request_timeout_seconds: 25
+  request_delay_seconds: 1.0
+  max_list_pages_per_source: 8
+  max_articles_per_run: 300
+  user_agent: >-
+    Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36
+    (KHTML, like Gecko) Chrome/124.0 Safari/537.36 Shipwatch/0.1
+  relevance_keywords:
+    - 新船
+    - 船舶
+    - 船东
+    - 项目
+    - 签约
+    - 订单
+    - 开工
+    - 点火开工
+    - 切割
+    - 开板
+    - 铺龙骨
+    - 上船台
+    - 出坞
+    - 下水
+    - 试航
+    - 交付
+    - 完工
+  excluded_keywords:
+    - 航空母舰
+    - 驱逐舰
+    - 护卫舰
+    - 潜艇
+    - 军舰
+    - 入列
+
+sources:
+  - id: hudong_zhonghua
+    yard: 沪东中华
+    official_name: 沪东中华造船（集团）有限公司
+    aliases: [沪东中华, 沪东中华造船]
+    website:
+      base_url: https://hz-shipgroup.cssc.net.cn/
+      seed_urls:
+        - https://hz-shipgroup.cssc.net.cn/
+    wechat:
+      account_names: [沪东中华造船, 沪东中华]
+
+  - id: jiangnan
+    yard: 江南造船
+    official_name: 江南造船（集团）有限责任公司
+    aliases: [江南造船, 江南船厂]
+    website:
+      base_url: https://jnshipyard.cssc.net.cn/
+      seed_urls:
+        - https://jnshipyard.cssc.net.cn/
+    wechat:
+      account_names: [江南造船, CSSC-JN]
+
+  - id: waigaoqiao
+    yard: 上海外高桥造船
+    official_name: 上海外高桥造船有限公司
+    aliases: [上海外高桥造船, 外高桥造船, 外高桥]
+    website:
+      base_url: https://www.chinasws.com/
+      seed_urls:
+        - https://www.chinasws.com/
+    wechat:
+      account_names: [上海外高桥造船, 外高桥造船]
+
+  - id: xiamen
+    yard: 厦门船舶重工
+    official_name: 厦门船舶重工股份有限公司
+    aliases: [厦门船舶重工, 厦船重工, 厦门重工]
+    website:
+      base_url: https://www.xsi.com.cn/
+      seed_urls:
+        - https://www.xsi.com.cn/
+    wechat:
+      account_names: [厦船重工, 厦门船舶重工, xsimaster]
+
+  - id: wuchang
+    yard: 武昌船舶重工
+    official_name: 武昌船舶重工集团有限公司
+    aliases: [武昌船舶重工, 武昌造船, 武船集团, 武船]
+    website:
+      # 该官网当前 HTTPS 证书与域名不匹配，使用其官方 HTTP 入口。
+      base_url: http://www.wuchuan.com.cn/
+      seed_urls:
+        - http://www.wuchuan.com.cn/
+    wechat:
+      account_names: [武昌造船, 武船集团, 武昌船舶重工, CSSC_WSnews]
+
+  - id: cssc_group
+    yard: 中国船舶集团
+    official_name: 中国船舶集团有限公司
+    aliases: [中国船舶集团, 中国船舶]
+    group_source: true
+    website:
+      # 该官网当前 HTTPS 证书与域名不匹配，使用其官方 HTTP 入口。
+      base_url: http://www.cssc.net.cn/
+      seed_urls:
+        - http://www.cssc.net.cn/
+    wechat:
+      account_names: [中国船舶, 中国船舶集团]
