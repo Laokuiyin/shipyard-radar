@@ -57,6 +57,7 @@ class Settings:
     web_host: str
     web_port: int
     web_title: str
+    wechat_cookie: str | None
 
     @property
     def yards(self) -> list[SourceConfig]:
@@ -78,6 +79,30 @@ def load_dotenv(path: str | Path = ".env") -> None:
         os.environ.setdefault(key.strip(), value.strip().strip("'\""))
 
 
+def load_cookie_file(path: str | Path | None) -> str | None:
+    if not path:
+        return None
+    cookie_path = Path(path)
+    if not cookie_path.exists():
+        return None
+    raw = cookie_path.read_text(encoding="utf-8").strip()
+    if not raw:
+        return None
+    pairs: list[str] = []
+    for line in raw.splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        parts = stripped.split("\t")
+        if len(parts) >= 7:
+            domain, _, _, _, _, name, value = parts[:7]
+            if "qq.com" in domain or "weixin" in domain:
+                pairs.append(f"{name}={value}")
+        elif "=" in stripped and ";" not in stripped[: stripped.find("=")]:
+            pairs.append(stripped)
+    return "; ".join(pairs) if pairs else raw
+
+
 def load_settings(path: str | Path | None = None) -> Settings:
     load_dotenv()
     config_path = Path(path or os.getenv("SHIPWATCH_CONFIG", "config.yaml"))
@@ -96,6 +121,9 @@ def load_settings(path: str | Path | None = None) -> Settings:
                 group_source=bool(item.get("group_source", False)),
             )
         )
+    cookie = os.getenv("SHIPWATCH_WECHAT_COOKIE") or load_cookie_file(
+        os.getenv("SHIPWATCH_WECHAT_COOKIE_FILE", "data/wechat_cookies.txt")
+    )
     return Settings(
         app=app,
         sources=sources,
@@ -108,4 +136,5 @@ def load_settings(path: str | Path | None = None) -> Settings:
         web_host=os.getenv("SHIPWATCH_WEB_HOST", "127.0.0.1"),
         web_port=int(os.getenv("SHIPWATCH_WEB_PORT", "8080")),
         web_title=os.getenv("SHIPWATCH_WEB_TITLE", "船厂新船项目雷达"),
+        wechat_cookie=cookie,
     )

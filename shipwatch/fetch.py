@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass
+from urllib.parse import urlsplit
 
 import httpx
 
@@ -15,9 +16,16 @@ class FetchResult:
 
 
 class Fetcher:
-    def __init__(self, user_agent: str, timeout: int = 25, delay: float = 1.0):
+    def __init__(
+        self,
+        user_agent: str,
+        timeout: int = 25,
+        delay: float = 1.0,
+        wechat_cookie: str | None = None,
+    ):
         self.delay = delay
         self._last_request_at = 0.0
+        self.wechat_cookie = wechat_cookie
         self.client = httpx.Client(
             timeout=timeout,
             follow_redirects=True,
@@ -34,7 +42,8 @@ class Fetcher:
         wait = self.delay - (time.monotonic() - self._last_request_at)
         if wait > 0:
             time.sleep(wait)
-        response = self.client.get(url)
+        headers = self._headers_for_url(url)
+        response = self.client.get(url, headers=headers)
         self._last_request_at = time.monotonic()
         response.raise_for_status()
         if not response.encoding or response.encoding.lower() == "iso-8859-1":
@@ -46,3 +55,15 @@ class Fetcher:
             content_type=response.headers.get("content-type", ""),
         )
 
+    def _headers_for_url(self, url: str) -> dict[str, str] | None:
+        host = urlsplit(url).hostname or ""
+        if host != "mp.weixin.qq.com" or not self.wechat_cookie:
+            return None
+        return {
+            "Cookie": self.wechat_cookie,
+            "Referer": "https://mp.weixin.qq.com/",
+            "Accept": (
+                "text/html,application/xhtml+xml,application/xml;q=0.9,"
+                "image/avif,image/webp,*/*;q=0.8"
+            ),
+        }

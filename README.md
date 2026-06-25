@@ -96,6 +96,42 @@ HTTPS，再使用 `deploy/shipwatch-nginx.conf` 反向代理。
 
 来源 ID：`hudong_zhonghua`、`jiangnan`、`waigaoqiao`、`xiamen`、`wuchang`、`cssc_group`、`ship_offshore`、`imarine`、`zpmc`。
 
+### 公众号授权会话补采
+
+如果微信公众号正文返回验证码或反爬页，可以在本机浏览器中手工打开任意
+`mp.weixin.qq.com` 文章并完成微信要求的验证，然后把该域名 Cookie 保存到
+服务器的 `data/wechat_cookies.txt`。文件既支持普通 Cookie Header：
+
+```text
+wap_sid2=...; appmsg_token=...; ...
+```
+
+也支持浏览器插件常见的 Netscape cookies.txt 格式。`data/` 已被 `.gitignore`
+排除，不会提交到 GitHub。
+
+保存 Cookie 后重试已记录的公众号原文：
+
+```bash
+.venv/bin/shipwatch refetch-wechat --limit 50
+.venv/bin/shipwatch extract
+```
+
+只重试某个来源：
+
+```bash
+.venv/bin/shipwatch refetch-wechat --source hudong_zhonghua --limit 20
+```
+
+也可以用环境变量指定 Cookie：
+
+```dotenv
+SHIPWATCH_WECHAT_COOKIE_FILE=data/wechat_cookies.txt
+# 或者
+SHIPWATCH_WECHAT_COOKIE='wap_sid2=...; appmsg_token=...'
+```
+
+系统只会在请求 `mp.weixin.qq.com` 时带上该 Cookie，不会发送给搜狗或其他网站。
+
 ## Linux 定时任务
 
 ```bash
@@ -117,7 +153,7 @@ crontab -e
 
 ## 公众号采集边界
 
-微信公众号没有稳定的公开文章列表 API。系统通过搜狗微信发现文章，并只接受最终跳转到 `mp.weixin.qq.com` 且公众号名称符合白名单的页面。若触发验证码，任务记录错误并继续处理其他来源，不尝试绕过验证；可以用 `add-url` 补充漏掉的官方原文。
+微信公众号没有稳定的公开文章列表 API。系统通过搜狗微信发现文章，并只接受最终跳转到 `mp.weixin.qq.com` 且公众号名称符合白名单的页面。若触发验证码，任务记录错误并继续处理其他来源，不自动破解或绕过验证；可以用 `add-url` 补充漏掉的官方原文，或用 `refetch-wechat` 在手工完成验证后的授权会话下补采正文。
 
 为避免单个公众号连续验证码或反爬拖慢整轮任务，`app.wechat_consecutive_block_limit` 控制同一公众号连续正文受限后的本轮熔断阈值，默认 8 次。
 

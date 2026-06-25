@@ -31,6 +31,7 @@ class Pipeline:
             self.settings.app.user_agent,
             self.settings.app.request_timeout_seconds,
             self.settings.app.request_delay_seconds,
+            self.settings.wechat_cookie,
         )
         collected = 0
         discovered = 0
@@ -98,6 +99,7 @@ class Pipeline:
             self.settings.app.user_agent,
             self.settings.app.request_timeout_seconds,
             self.settings.app.request_delay_seconds,
+            self.settings.wechat_cookie,
         )
         try:
             return Collector(self.settings, self.db, fetcher).collect(
@@ -105,6 +107,61 @@ class Pipeline:
             )
         finally:
             fetcher.close()
+
+    def refetch_wechat(
+        self, source_id: str | None = None, limit: int = 100
+    ) -> dict[str, int]:
+        conditions = [
+            "channel='微信公众号'",
+            "fetch_status IN ('blocked', 'partial', 'error')",
+            "url LIKE 'https://mp.weixin.qq.com/%'",
+        ]
+        params: list[object] = []
+        if source_id:
+            conditions.append("source_id=?")
+            params.append(source_id)
+        params.append(limit)
+        rows = self.db.query(
+            f"""
+            SELECT * FROM articles
+            WHERE {" AND ".join(conditions)}
+            ORDER BY updated_at DESC
+            LIMIT ?
+            """,
+            tuple(params),
+        )
+        fetcher = Fetcher(
+            self.settings.app.user_agent,
+            self.settings.app.request_timeout_seconds,
+            self.settings.app.request_delay_seconds,
+            self.settings.wechat_cookie,
+        )
+        ok = partial = failed = 0
+        try:
+            collector = Collector(self.settings, self.db, fetcher)
+            for row in rows:
+                collector.collect(
+                    ArticleCandidate(
+                        source_id=row["source_id"],
+                        yard_hint=row["yard_hint"],
+                        channel=row["channel"],
+                        title=row["title"],
+                        url=row["url"],
+                        published_at=date.fromisoformat(row["published_at"])
+                        if row["published_at"]
+                        else None,
+                        account_name=row["account_name"],
+                    )
+                )
+                if collector.last_fetch_status == "ok":
+                    ok += 1
+                elif collector.last_fetch_status == "partial":
+                    partial += 1
+                else:
+                    failed += 1
+        finally:
+            fetcher.close()
+        return {"selected": len(rows), "ok": ok, "partial": partial, "failed": failed}
 
     def extract_pending(self) -> dict[str, int]:
         extractor = HybridExtractor(self.settings)

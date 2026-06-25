@@ -20,6 +20,9 @@ def build_parser() -> argparse.ArgumentParser:
     collect.add_argument("--since", help="起始日期 YYYY-MM-DD")
     collect.add_argument("--website-only", action="store_true")
     collect.add_argument("--wechat-only", action="store_true")
+    refetch = sub.add_parser("refetch-wechat", help="使用授权 Cookie 重试公众号正文")
+    refetch.add_argument("--source", help="只重试某个来源ID")
+    refetch.add_argument("--limit", type=int, default=100)
 
     add = sub.add_parser("add-url", help="人工补充官网或微信文章链接")
     add.add_argument("url")
@@ -56,6 +59,8 @@ def main() -> None:
             wechat=not args.website_only,
         )
         print(result)
+    elif args.command == "refetch-wechat":
+        print(pipeline.refetch_wechat(source_id=args.source, limit=args.limit))
     elif args.command == "add-url":
         article_id = pipeline.add_url(args.url, args.source, args.title)
         print({"article_id": article_id})
