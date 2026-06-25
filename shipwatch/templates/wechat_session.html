@@ -1,0 +1,71 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="panel">
+  <div class="panel-head">
+    <div>
+      <p class="eyebrow">WECHAT SESSION</p>
+      <h2>微信公众号正文补采</h2>
+    </div>
+  </div>
+
+  {% if msg %}<div class="notice ok">{{ msg }}</div>{% endif %}
+  {% if error %}<div class="notice bad">{{ error }}</div>{% endif %}
+
+  <div class="settings-grid">
+    <article class="setting-card">
+      <p class="eyebrow">COOKIE STATUS</p>
+      <h3>{{ '已配置' if cookie_configured else '未配置' }}</h3>
+      <dl>
+        <dt>保存位置</dt><dd>{{ cookie_path }}</dd>
+        <dt>更新时间</dt><dd>{{ cookie_updated_at[:19].replace('T', ' ') if cookie_updated_at else '—' }}</dd>
+      </dl>
+      <p class="hint">页面不会回显 Cookie 内容。Cookie 属于敏感会话信息，只应来自你自己的浏览器。</p>
+    </article>
+
+    <article class="setting-card">
+      <p class="eyebrow">HOW TO USE</p>
+      <h3>推荐流程</h3>
+      <ol class="steps">
+        <li>在浏览器打开失败的公众号原文，手工完成微信验证。</li>
+        <li>用 Cookie 导出插件导出 <code>mp.weixin.qq.com</code> Cookie。</li>
+        <li>粘贴到下方保存，然后执行补采。</li>
+      </ol>
+    </article>
+  </div>
+
+  <form class="stack-form" method="post" action="/wechat-session/save">
+    <label>粘贴微信 Cookie
+      <textarea name="cookie" rows="7" placeholder="wap_sid2=...; appmsg_token=...; ...&#10;或 Netscape cookies.txt 格式"></textarea>
+    </label>
+    <button type="submit">保存 Cookie</button>
+  </form>
+</section>
+
+<section class="panel space-top">
+  <div class="panel-head">
+    <div>
+      <p class="eyebrow">REFETCH</p>
+      <h2>重试已记录的公众号原文</h2>
+    </div>
+  </div>
+  <form class="filters compact refetch-form" method="post" action="/wechat-session/refetch">
+    <label>来源
+      <select name="source">
+        <option value="">全部公众号来源</option>
+        {% for source in sources %}
+          <option value="{{ source.id }}">{{ source.yard }}（{{ source.id }}）</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label>最多条数
+      <input type="number" name="limit" min="1" max="500" value="50">
+    </label>
+    <label class="checkbox-label">
+      <input type="checkbox" name="extract_after" value="1" checked>
+      补采后立即抽取
+    </label>
+    <button type="submit">开始补采</button>
+  </form>
+  <p class="panel-note">只会重试数据库中已有的 <code>mp.weixin.qq.com</code> 原文链接，不会重新访问搜狗临时跳转链接。</p>
+</section>
+{% endblock %}

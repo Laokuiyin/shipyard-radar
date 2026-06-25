@@ -1,16 +1,20 @@
 from __future__ import annotations
 
+import os
 from contextlib import asynccontextmanager
+from datetime import datetime
 from pathlib import Path
+from urllib.parse import parse_qs
 from urllib.parse import urlencode
 
 from fastapi import FastAPI, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-from shipwatch.config import Settings, load_settings
+from shipwatch.config import Settings, load_cookie_file, load_settings
 from shipwatch.db import Database
+from shipwatch.pipeline import Pipeline
 
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -65,6 +69,29 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "title": settings.web_title,
             "active": active,
         }
+
+    def wechat_cookie_path() -> Path:
+        configured = os.getenv("SHIPWATCH_WECHAT_COOKIE_FILE")
+        if configured:
+            return Path(configured)
+        return settings.db_path.parent / "wechat_cookies.txt"
+
+    def reload_wechat_cookie() -> None:
+        settings.wechat_cookie = os.getenv("SHIPWATCH_WECHAT_COOKIE") or load_cookie_file(
+            wechat_cookie_path()
+        )
+
+    async def form_data(request: Request) -> dict[str, str]:
+        raw = (await request.body()).decode("utf-8")
+        parsed = parse_qs(raw, keep_blank_values=True)
+        return {key: values[-1] if values else "" for key, values in parsed.items()}
+
+    def redirect_to_wechat_session(**params: object) -> RedirectResponse:
+        query = urlencode({key: value for key, value in params.items() if value is not None})
+        return RedirectResponse(
+            f"/wechat-session?{query}" if query else "/wechat-session",
+            status_code=303,
+        )
 
     @app.get("/", response_class=HTMLResponse)
     def dashboard(
@@ -181,6 +208,63 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         context = base_context(request, "source_status")
         context["rows"] = rows
         return templates.TemplateResponse(request, "source_status.html", context)
+
+    @app.get("/wechat-session", response_class=HTMLResponse)
+    def wechat_session(request: Request, msg: str = "", error: str = ""):
+        reload_wechat_cookie()
+        cookie_path = wechat_cookie_path()
+        context = base_context(request, "wechat_session")
+        context.update(
+            {
+                "cookie_configured": bool(settings.wechat_cookie),
+                "cookie_path": str(cookie_path),
+                "cookie_updated_at": datetime.fromtimestamp(cookie_path.stat().st_mtime).isoformat()
+                if cookie_path.exists()
+                else None,
+                "sources": [source for source in settings.sources if source.wechat],
+                "msg": msg,
+                "error": error,
+            }
+        )
+        return templates.TemplateResponse(request, "wechat_session.html", context)
+
+    @app.post("/wechat-session/save")
+    async def save_wechat_session(request: Request):
+        data = await form_data(request)
+        cookie = data.get("cookie", "").strip()
+        if not cookie:
+            return redirect_to_wechat_session(error="Cookie 内容为空，未保存")
+        cookie_path = wechat_cookie_path()
+        cookie_path.parent.mkdir(parents=True, exist_ok=True)
+        cookie_path.write_text(cookie + "\n", encoding="utf-8")
+        reload_wechat_cookie()
+        return redirect_to_wechat_session(msg="微信 Cookie 已保存")
+
+    @app.post("/wechat-session/refetch")
+    async def refetch_wechat_session(request: Request):
+        reload_wechat_cookie()
+        if not settings.wechat_cookie:
+            return redirect_to_wechat_session(error="尚未配置微信 Cookie，不能补采")
+        data = await form_data(request)
+        source_id = data.get("source") or None
+        try:
+            limit = max(1, min(int(data.get("limit", "50")), 500))
+        except ValueError:
+            limit = 50
+        pipeline = Pipeline(settings)
+        result = pipeline.refetch_wechat(source_id=source_id, limit=limit)
+        extract_result = None
+        if data.get("extract_after") == "1":
+            extract_result = pipeline.extract_pending()
+        message = (
+            f"补采完成：选中 {result['selected']}，成功 {result['ok']}，"
+            f"部分 {result['partial']}，失败 {result['failed']}"
+        )
+        if extract_result:
+            message += (
+                f"；抽取 {extract_result['processed']}，相关 {extract_result['relevant']}"
+            )
+        return redirect_to_wechat_session(msg=message)
 
     @app.get("/health")
     def health():
