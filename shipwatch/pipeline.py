@@ -44,19 +44,46 @@ class Pipeline:
             seen: set[str] = set()
             for source in self.settings.sources:
                 for channel_name, discovery in collectors:
+                    if channel_name == "website" and source.website is None:
+                        continue
+                    if channel_name == "wechat" and source.wechat is None:
+                        continue
                     source_key = f"{source.id}:{channel_name}"
                     try:
                         candidates = discovery.discover(source, since)
                         discovered += len(candidates)
+                        consecutive_blocked = 0
+                        source_error = None
                         for candidate in candidates:
                             if candidate.url in seen:
                                 continue
                             seen.add(candidate.url)
                             article_collector.collect(candidate)
                             collected += 1
+                            if (
+                                candidate.channel == "微信公众号"
+                                and article_collector.last_fetch_status in {"blocked", "partial", "error"}
+                                and Collector.is_restricted_error(article_collector.last_fetch_error)
+                            ):
+                                consecutive_blocked += 1
+                            else:
+                                consecutive_blocked = 0
+                            if (
+                                candidate.channel == "微信公众号"
+                                and consecutive_blocked
+                                >= self.settings.app.wechat_consecutive_block_limit
+                            ):
+                                source_error = (
+                                    "公众号正文连续受验证码/反爬限制 "
+                                    f"{consecutive_blocked} 次，已熔断本轮采集"
+                                )
+                                logger.warning("来源熔断 %s: %s", source_key, source_error)
+                                break
                             if collected >= self.settings.app.max_articles_per_run:
                                 return {"discovered": discovered, "collected": collected}
-                        self.db.set_crawl_state(source_key, result_count=len(candidates))
+                        self.db.set_crawl_state(
+                            source_key, source_error, result_count=len(candidates)
+                        )
                     except Exception as exc:
                         logger.exception("来源失败 %s", source_key)
                         self.db.set_crawl_state(source_key, str(exc), result_count=0)
@@ -105,7 +132,17 @@ class Pipeline:
         output_path = output_path or daily_output_path(self.settings.output_dir)
         start = datetime.combine(date.today(), time.min).isoformat()
         source_names = {source.id: source.yard for source in self.settings.sources}
-        return ExcelExporter(self.db, source_names).export(output_path, changed_since=start)
+        source_channels = {}
+        for source in self.settings.sources:
+            channels = []
+            if source.website:
+                channels.append(("website", "官网"))
+            if source.wechat:
+                channels.append(("wechat", "微信公众号"))
+            source_channels[source.id] = channels
+        return ExcelExporter(self.db, source_names, source_channels).export(
+            output_path, changed_since=start
+        )
 
     def run_daily(self) -> tuple[dict[str, int], dict[str, int]]:
         since = date.today() - timedelta(days=14)

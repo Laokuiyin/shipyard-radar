@@ -25,8 +25,8 @@ class SourceConfig:
     yard: str
     official_name: str
     aliases: list[str]
-    website: WebsiteConfig
-    wechat: WechatConfig
+    website: WebsiteConfig | None
+    wechat: WechatConfig | None
     group_source: bool = False
 
 
@@ -38,6 +38,7 @@ class AppConfig:
     request_delay_seconds: float = 1.0
     max_list_pages_per_source: int = 8
     max_articles_per_run: int = 300
+    wechat_consecutive_block_limit: int = 8
     user_agent: str = "Shipwatch/0.1"
     relevance_keywords: list[str] = field(default_factory=list)
     excluded_keywords: list[str] = field(default_factory=list)
@@ -90,8 +91,8 @@ def load_settings(path: str | Path | None = None) -> Settings:
                 yard=item["yard"],
                 official_name=item["official_name"],
                 aliases=item.get("aliases", []),
-                website=WebsiteConfig(**item["website"]),
-                wechat=WechatConfig(**item["wechat"]),
+                website=WebsiteConfig(**item["website"]) if item.get("website") else None,
+                wechat=WechatConfig(**item["wechat"]) if item.get("wechat") else None,
                 group_source=bool(item.get("group_source", False)),
             )
         )

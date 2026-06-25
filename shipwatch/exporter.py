@@ -40,9 +40,15 @@ HEADERS = {
 
 
 class ExcelExporter:
-    def __init__(self, db: Database, source_names: dict[str, str] | None = None):
+    def __init__(
+        self,
+        db: Database,
+        source_names: dict[str, str] | None = None,
+        source_channels: dict[str, list[tuple[str, str]]] | None = None,
+    ):
         self.db = db
         self.source_names = source_names or {}
+        self.source_channels = source_channels or {}
 
     def export(self, output_path: Path, changed_since: str | None = None) -> Path:
         output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -145,7 +151,10 @@ class ExcelExporter:
             {key.split(":", 1)[0] for key in states}
         )
         for source_id in source_ids:
-            for channel_key, channel_name in (("website", "官网"), ("wechat", "微信公众号")):
+            channels = self.source_channels.get(
+                source_id, [("website", "官网"), ("wechat", "微信公众号")]
+            )
+            for channel_key, channel_name in channels:
                 key = f"{source_id}:{channel_key}"
                 row = states.get(key)
                 if not row:

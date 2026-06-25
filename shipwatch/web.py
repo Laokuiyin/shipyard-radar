@@ -147,7 +147,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         states = {row["source_key"]: row for row in db.query("SELECT * FROM crawl_state")}
         rows = []
         for source in settings.sources:
-            for channel_key, channel_name in (("website", "官网"), ("wechat", "微信公众号")):
+            channels = []
+            if source.website:
+                channels.append(("website", "官网"))
+            if source.wechat:
+                channels.append(("wechat", "微信公众号"))
+            for channel_key, channel_name in channels:
                 state = states.get(f"{source.id}:{channel_key}")
                 if state:
                     rows.append(

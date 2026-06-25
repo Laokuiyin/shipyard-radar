@@ -5,6 +5,7 @@ app:
   request_delay_seconds: 1.0
   max_list_pages_per_source: 8
   max_articles_per_run: 300
+  wechat_consecutive_block_limit: 8
   user_agent: >-
     Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36
     (KHTML, like Gecko) Chrome/124.0 Safari/537.36 Shipwatch/0.1
@@ -44,7 +45,7 @@ sources:
       seed_urls:
         - https://hz-shipgroup.cssc.net.cn/
     wechat:
-      account_names: [沪东中华造船, 沪东中华]
+      account_names: [沪东中华造船, 沪东中华, 沪东中华造船厂, hdzhbz]
 
   - id: jiangnan
     yard: 江南造船
@@ -103,3 +104,31 @@ sources:
         - http://www.cssc.net.cn/
     wechat:
       account_names: [中国船舶, 中国船舶集团]
+
+  - id: ship_offshore
+    yard: 航海装备网
+    official_name: 航海装备网
+    aliases: [航海装备网, ship-offshore]
+    group_source: true
+    wechat:
+      account_names: [航海装备网, ship-offshore]
+
+  - id: imarine
+    yard: 龙de船人
+    official_name: 龙de船人
+    aliases: [龙de船人, 龙的船人, imarine]
+    group_source: true
+    wechat:
+      account_names: [龙de船人, 龙的船人, imarine]
+
+  - id: zpmc
+    yard: 上海振华重工
+    official_name: 上海振华重工（集团）股份有限公司
+    aliases: [上海振华重工, 振华重工, ZPMC, zpmc1992]
+    group_source: true
+    website:
+      base_url: https://cn.zpmc.com/
+      seed_urls:
+        - https://cn.zpmc.com/news/company
+    wechat:
+      account_names: [上海振华重工, 振华重工, zpmc1992]

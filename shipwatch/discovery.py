@@ -19,6 +19,8 @@ class WebsiteDiscovery:
         self.fetcher = fetcher
 
     def discover(self, source: SourceConfig, since: date) -> list[ArticleCandidate]:
+        if source.website is None:
+            return []
         host = urlsplit(source.website.base_url).hostname or ""
         queue = list(source.website.seed_urls)
         visited: set[str] = set()
@@ -88,6 +90,8 @@ class WechatDiscovery:
         self.fetcher = fetcher
 
     def discover(self, source: SourceConfig, since: date) -> list[ArticleCandidate]:
+        if source.wechat is None:
+            return []
         results: dict[str, ArticleCandidate] = {}
         for account in source.wechat.account_names:
             for page_no in range(1, min(self.settings.app.max_list_pages_per_source, 10) + 1):
