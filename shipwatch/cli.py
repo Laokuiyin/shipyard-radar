@@ -21,10 +21,6 @@ def build_parser() -> argparse.ArgumentParser:
     collect.add_argument("--source", help="只处理指定来源ID，多个用逗号隔开")
     collect.add_argument("--website-only", action="store_true", help="兼容旧参数；官网采集已关闭")
     collect.add_argument("--wechat-only", action="store_true", help="兼容旧参数；当前默认仅采集公众号")
-    refetch = sub.add_parser("refetch-wechat", help="使用授权 Cookie 重试公众号正文")
-    refetch.add_argument("--source", help="只重试某个来源ID")
-    refetch.add_argument("--limit", type=int, default=100)
-
     add = sub.add_parser("add-url", help="人工补充微信公众号原文链接")
     add.add_argument("url")
     add.add_argument("--source", required=True, help="来源ID，例如 hudong_zhonghua")
@@ -61,8 +57,6 @@ def main() -> None:
             source_ids=args.source.split(",") if args.source else None,
         )
         print(result)
-    elif args.command == "refetch-wechat":
-        print(pipeline.refetch_wechat(source_id=args.source, limit=args.limit))
     elif args.command == "add-url":
         article_id = pipeline.add_url(args.url, args.source, args.title)
         print({"article_id": article_id})

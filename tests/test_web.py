@@ -49,26 +49,6 @@ def test_dashboard_and_health(tmp_path):
     assert client.get("/source-status").status_code == 200
 
 
-def test_wechat_session_page_saves_cookie_without_echo(tmp_path):
-    settings = load_settings("config.yaml")
-    settings.db_path = tmp_path / "web.db"
-    db = Database(settings.db_path)
-    db.init()
-
-    client = TestClient(create_app(settings))
-    page = client.get("/wechat-session")
-    assert page.status_code == 200
-    assert "微信公众号正文补采" in page.text
-
-    cookie = "wap_sid2=secret; appmsg_token=hidden"
-    response = client.post("/wechat-session/save", data={"cookie": cookie}, follow_redirects=True)
-    assert response.status_code == 200
-    assert "已配置" in response.text
-    assert "secret" not in response.text
-    assert "hidden" not in response.text
-    assert (tmp_path / "wechat_cookies.txt").exists()
-
-
 def test_sources_open_link_uses_wechat_target_url(tmp_path):
     settings = load_settings("config.yaml")
     settings.db_path = tmp_path / "web.db"
