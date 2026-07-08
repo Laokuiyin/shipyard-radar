@@ -152,7 +152,7 @@ class ExcelExporter:
         )
         for source_id in source_ids:
             channels = self.source_channels.get(
-                source_id, [("website", "官网"), ("wechat", "微信公众号")]
+                source_id, [("wechat", "微信公众号")]
             )
             for channel_key, channel_name in channels:
                 key = f"{source_id}:{channel_key}"
@@ -238,8 +238,6 @@ class ExcelExporter:
             ("appmsgcaptcha", "微信验证码"),
             ("未跳转到微信原文", "原文跳转失败"),
             ("正文过短", "正文为空或过短"),
-            ("SSL", "官网 TLS/SSL 连接失败"),
-            ("TLS", "官网 TLS/SSL 连接失败"),
             ("待补采", "正文尚未成功获取"),
         )
         for keyword, label in checks:

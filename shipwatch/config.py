@@ -38,7 +38,7 @@ class AppConfig:
     request_delay_seconds: float = 1.0
     max_list_pages_per_source: int = 8
     max_articles_per_run: int = 300
-    wechat_consecutive_block_limit: int = 8
+    discovery_stop_existing_count: int = 20
     user_agent: str = "Shipwatch/0.1"
     relevance_keywords: list[str] = field(default_factory=list)
     excluded_keywords: list[str] = field(default_factory=list)
@@ -58,6 +58,7 @@ class Settings:
     web_port: int
     web_title: str
     wechat_cookie: str | None
+    dajiala_api_key: str | None
 
     @property
     def yards(self) -> list[SourceConfig]:
@@ -65,6 +66,25 @@ class Settings:
 
     def source_by_id(self, source_id: str) -> SourceConfig:
         return next(source for source in self.sources if source.id == source_id)
+
+
+def single_wechat_account(values: list[str] | str | None) -> str:
+    if not values:
+        return ""
+    items = values if isinstance(values, list) else [values]
+    for item in items:
+        for part in str(item).replace("，", ",").split(","):
+            account = part.strip()
+            if account:
+                return account
+    return ""
+
+
+def single_wechat_config(raw: dict[str, Any] | None) -> WechatConfig | None:
+    if not raw:
+        return None
+    account = single_wechat_account(raw.get("account_names"))
+    return WechatConfig([account]) if account else None
 
 
 def load_dotenv(path: str | Path = ".env") -> None:
@@ -117,10 +137,41 @@ def load_settings(path: str | Path | None = None) -> Settings:
                 official_name=item["official_name"],
                 aliases=item.get("aliases", []),
                 website=WebsiteConfig(**item["website"]) if item.get("website") else None,
-                wechat=WechatConfig(**item["wechat"]) if item.get("wechat") else None,
+                wechat=single_wechat_config(item.get("wechat")),
                 group_source=bool(item.get("group_source", False)),
             )
         )
+    # Load source overrides from JSON file (for web-based configuration)
+    override_path = Path(os.environ.get("SHIPWATCH_OVERRIDES_FILE", "data/source_overrides.json"))
+    if override_path.exists():
+        import json
+        overrides = json.loads(override_path.read_text(encoding="utf-8"))
+        enabled = []
+        for s in sources:
+            o = overrides.get(s.id, {})
+            if o.get("disabled"):
+                continue
+            if o.get("wechat_accounts") and s.wechat:
+                s.wechat.account_names = [single_wechat_account(o["wechat_accounts"])]
+            enabled.append(s)
+        for item in overrides.get("__custom__", []):
+            if not item.get("enabled", True):
+                continue
+            account = single_wechat_account(item.get("wechat_accounts"))
+            if not item.get("id") or not account:
+                continue
+            enabled.append(
+                SourceConfig(
+                    id=item["id"],
+                    yard=item.get("yard") or item["id"],
+                    official_name=item.get("yard") or item["id"],
+                    aliases=[item.get("yard") or item["id"]],
+                    website=None,
+                    wechat=WechatConfig([account]),
+                    group_source=True,
+                )
+            )
+        sources = enabled
     cookie = os.getenv("SHIPWATCH_WECHAT_COOKIE") or load_cookie_file(
         os.getenv("SHIPWATCH_WECHAT_COOKIE_FILE", "data/wechat_cookies.txt")
     )
@@ -136,5 +187,6 @@ def load_settings(path: str | Path | None = None) -> Settings:
         web_host=os.getenv("SHIPWATCH_WEB_HOST", "127.0.0.1"),
         web_port=int(os.getenv("SHIPWATCH_WEB_PORT", "8080")),
         web_title=os.getenv("SHIPWATCH_WEB_TITLE", "船厂新船项目雷达"),
-        wechat_cookie=cookie,
-    )
+       wechat_cookie=cookie,
+        dajiala_api_key=os.getenv("DAJIALA_API_KEY") or None,
+   )

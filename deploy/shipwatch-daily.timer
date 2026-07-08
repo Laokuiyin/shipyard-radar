@@ -1,0 +1,10 @@
+[Unit]
+Description=Run Shipyard Radar Daily Collection Every Two Days
+
+[Timer]
+OnCalendar=*-*-1/2 07:30:00
+Persistent=true
+Unit=shipwatch-daily.service
+
+[Install]
+WantedBy=timers.target

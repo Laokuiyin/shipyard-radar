@@ -2,8 +2,8 @@
 {% block content %}
 <section class="metrics">
   <article><span>项目候选</span><strong>{{ metrics.projects }}</strong></article>
-  <article><span>当前开工</span><strong>{{ metrics.starts }}</strong></article>
-  <article><span>待人工复核</span><strong>{{ metrics.reviews }}</strong></article>
+  <article><span>已确认</span><strong>{{ metrics.confirmed }}</strong></article>
+  <article><span>待复核</span><strong>{{ metrics.reviews }}</strong></article>
   <article class="{{ 'warn' if metrics.source_errors else '' }}"><span>来源异常</span><strong>{{ metrics.source_errors }}</strong></article>
 </section>
 
@@ -22,7 +22,10 @@
     <label>项目进度
       <select name="progress">
         <option value="">全部进度</option>
-        {% for item in progresses %}<option value="{{ item }}" {{ 'selected' if filters.progress == item else '' }}>{{ item or '未确定' }}</option>{% endfor %}
+        {% for item in progresses %}
+        {% set value = item if item else '__empty__' %}
+        <option value="{{ value }}" {{ 'selected' if filters.progress == value else '' }}>{{ item or '未确定' }}</option>
+        {% endfor %}
       </select>
     </label>
     <label>复核状态

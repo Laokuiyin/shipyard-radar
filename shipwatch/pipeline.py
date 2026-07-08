@@ -7,7 +7,7 @@ from pathlib import Path
 from shipwatch.collector import Collector
 from shipwatch.config import Settings
 from shipwatch.db import Database
-from shipwatch.discovery import WebsiteDiscovery, WechatDiscovery, default_since
+from shipwatch.discovery import WechatDiscovery, default_since
 from shipwatch.domain import ArticleCandidate
 from shipwatch.exporter import ExcelExporter, daily_output_path
 from shipwatch.extract import HybridExtractor
@@ -24,7 +24,8 @@ class Pipeline:
         self.db.init()
 
     def discover_and_collect(
-        self, since: date | None = None, websites: bool = True, wechat: bool = True
+        self, since: date | None = None, websites: bool = True, wechat: bool = True,
+        source_ids: list[str] | None = None
     ) -> dict[str, int]:
         since = since or default_since(self.settings)
         fetcher = Fetcher(
@@ -35,66 +36,62 @@ class Pipeline:
         )
         collected = 0
         discovered = 0
+        queued = 0
         try:
             collectors = []
-            if websites:
-                collectors.append(("website", WebsiteDiscovery(self.settings, fetcher)))
             if wechat:
-                collectors.append(("wechat", WechatDiscovery(self.settings, fetcher)))
-            article_collector = Collector(self.settings, self.db, fetcher)
+                collectors.append(
+                    (
+                        "wechat",
+                        WechatDiscovery(
+                            self.settings,
+                            fetcher,
+                            dajiala_api_key=self.settings.dajiala_api_key,
+                            db=self.db,
+                        ),
+                    )
+                )
+            article_collector = Collector(self.settings, self.db, fetcher, dajiala_api_key=self.settings.dajiala_api_key)
             seen: set[str] = set()
-            for source in self.settings.sources:
+            sources = [s for s in self.settings.sources if s.id in source_ids] if source_ids else self.settings.sources
+            for source in sources:
                 for channel_name, discovery in collectors:
-                    if channel_name == "website" and source.website is None:
-                        continue
                     if channel_name == "wechat" and source.wechat is None:
                         continue
                     source_key = f"{source.id}:{channel_name}"
                     try:
                         candidates = discovery.discover(source, since)
                         discovered += len(candidates)
-                        consecutive_blocked = 0
-                        source_error = None
                         for candidate in candidates:
                             if candidate.url in seen:
                                 continue
                             seen.add(candidate.url)
-                            article_collector.collect(candidate)
-                            collected += 1
-                            if (
-                                candidate.channel == "微信公众号"
-                                and article_collector.last_fetch_status in {"blocked", "partial", "error"}
-                                and Collector.is_restricted_error(article_collector.last_fetch_error)
-                            ):
-                                consecutive_blocked += 1
-                            else:
-                                consecutive_blocked = 0
-                            if (
-                                candidate.channel == "微信公众号"
-                                and consecutive_blocked
-                                >= self.settings.app.wechat_consecutive_block_limit
-                            ):
-                                source_error = (
-                                    "公众号正文连续受验证码/反爬限制 "
-                                    f"{consecutive_blocked} 次，已熔断本轮采集"
-                                )
-                                logger.warning("来源熔断 %s: %s", source_key, source_error)
-                                break
-                            if collected >= self.settings.app.max_articles_per_run:
-                                return {"discovered": discovered, "collected": collected}
+                            self.db.upsert_discovered_article(candidate)
+                            queued += 1
                         self.db.set_crawl_state(
-                            source_key, source_error, result_count=len(candidates)
+                            source_key,
+                            None,
+                            result_count=len(candidates),
+                            cursor=self._discovery_cursor(candidates),
                         )
                     except Exception as exc:
                         logger.exception("来源失败 %s", source_key)
                         self.db.set_crawl_state(source_key, str(exc), result_count=0)
+            for row in self.db.pending_body_fetch_articles(
+                limit=self.settings.app.max_articles_per_run,
+                source_ids=source_ids,
+            ):
+                article_collector.collect(self._candidate_from_row(row))
+                collected += 1
         finally:
             fetcher.close()
-        return {"discovered": discovered, "collected": collected}
+        return {"discovered": discovered, "queued": queued, "collected": collected}
 
     def add_url(self, url: str, source_id: str, title: str = "人工补充链接") -> int:
         source = self.settings.source_by_id(source_id)
-        channel = "微信公众号" if "weixin.qq.com" in url else "官网"
+        if "weixin.qq.com" not in url:
+            raise ValueError("已关闭官网采集，人工补充仅支持微信公众号原文链接")
+        channel = "微信公众号"
         fetcher = Fetcher(
             self.settings.app.user_agent,
             self.settings.app.request_timeout_seconds,
@@ -102,7 +99,7 @@ class Pipeline:
             self.settings.wechat_cookie,
         )
         try:
-            return Collector(self.settings, self.db, fetcher).collect(
+            return Collector(self.settings, self.db, fetcher, dajiala_api_key=self.settings.dajiala_api_key).collect(
                 ArticleCandidate(source.id, source.yard, channel, title, url)
             )
         finally:
@@ -138,7 +135,7 @@ class Pipeline:
         )
         ok = partial = failed = 0
         try:
-            collector = Collector(self.settings, self.db, fetcher)
+            collector = Collector(self.settings, self.db, fetcher, dajiala_api_key=self.settings.dajiala_api_key)
             for row in rows:
                 collector.collect(
                     ArticleCandidate(
@@ -185,18 +182,40 @@ class Pipeline:
                 self.db.mark_extraction_error(row["id"], str(exc))
         return {"processed": processed, "relevant": relevant}
 
+    @staticmethod
+    def _candidate_from_row(row) -> ArticleCandidate:
+        return ArticleCandidate(
+            source_id=row["source_id"],
+            yard_hint=row["yard_hint"],
+            channel=row["channel"],
+            title=row["title"],
+            url=row["url"],
+            published_at=date.fromisoformat(row["published_at"])
+            if row["published_at"]
+            else None,
+            account_name=row["account_name"],
+        )
+
+    @staticmethod
+    def _discovery_cursor(candidates: list[ArticleCandidate]) -> dict | None:
+        if not candidates:
+            return None
+        dated = [candidate for candidate in candidates if candidate.published_at]
+        if not dated:
+            return {"last_seen_url": candidates[0].url}
+        latest = max(dated, key=lambda item: item.published_at)
+        return {
+            "last_seen_published_at": latest.published_at.isoformat(),
+            "last_seen_url": latest.url,
+        }
+
     def export(self, output_path: Path | None = None) -> Path:
         output_path = output_path or daily_output_path(self.settings.output_dir)
         start = datetime.combine(date.today(), time.min).isoformat()
         source_names = {source.id: source.yard for source in self.settings.sources}
         source_channels = {}
         for source in self.settings.sources:
-            channels = []
-            if source.website:
-                channels.append(("website", "官网"))
-            if source.wechat:
-                channels.append(("wechat", "微信公众号"))
-            source_channels[source.id] = channels
+            source_channels[source.id] = [("wechat", "微信公众号")] if source.wechat else []
         return ExcelExporter(self.db, source_names, source_channels).export(
             output_path, changed_since=start
         )

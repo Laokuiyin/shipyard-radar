@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import os
+import hashlib
+import re
 from contextlib import asynccontextmanager
 from datetime import datetime
 from pathlib import Path
-from urllib.parse import parse_qs
 from urllib.parse import urlencode
 
 from fastapi import FastAPI, Request
@@ -12,13 +13,12 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-from shipwatch.config import Settings, load_cookie_file, load_settings
+from shipwatch.config import Settings, load_cookie_file, load_settings, single_wechat_account
 from shipwatch.db import Database
 from shipwatch.pipeline import Pipeline
-
+from shipwatch.text import normalize_url
 
 BASE_DIR = Path(__file__).resolve().parent
-
 
 def _status_label(last_error: str | None, result_count: int | None) -> str:
     if last_error and result_count:
@@ -26,7 +26,6 @@ def _status_label(last_error: str | None, result_count: int | None) -> str:
     if last_error:
         return "失败"
     return "成功"
-
 
 def _failure_reason(value: str | None) -> str | None:
     if not value:
@@ -39,13 +38,69 @@ def _failure_reason(value: str | None) -> str | None:
         ("验证码", "微信/搜狗验证码"),
         ("未跳转到微信原文", "原文跳转失败"),
         ("正文过短", "正文为空或过短"),
-        ("SSL", "官网 TLS/SSL 连接失败"),
         ("待补采", "正文尚未成功获取"),
     ):
         if keyword.lower() in value.lower() and label not in labels:
             labels.append(label)
     return "；".join(labels) if labels else value[:300]
 
+
+def _generated_source_id(yard: str, account: str, existing_ids: set[str]) -> str:
+    basis = f"{yard}|{account}".strip("|") or "source"
+    ascii_slug = re.sub(r"[^a-z0-9_]+", "_", basis.lower()).strip("_")
+    if not ascii_slug or not re.search(r"[a-z]", ascii_slug):
+        digest = hashlib.sha1(basis.encode("utf-8")).hexdigest()[:10]
+        ascii_slug = f"custom_{digest}"
+    candidate = ascii_slug[:48]
+    if candidate and candidate[0].isdigit():
+        candidate = f"src_{candidate}"
+    original = candidate
+    suffix = 2
+    while candidate in existing_ids:
+        tail = f"_{suffix}"
+        candidate = f"{original[:48 - len(tail)]}{tail}"
+        suffix += 1
+    return candidate
+
+
+def _progress_options(db: Database, yard: str = "", review_status: str = "", q: str = "") -> list[str]:
+    conditions = ["1=1"]
+    params: list[object] = []
+    if yard:
+        conditions.append("p.yard=?")
+        params.append(yard)
+    if review_status:
+        conditions.append("p.review_status=?")
+        params.append(review_status)
+    if q:
+        conditions.append(
+            """
+            (COALESCE(p.owner_project, '') LIKE ? OR COALESCE(p.ship_type, '') LIKE ?
+             OR COALESCE(p.series_identifier, '') LIKE ? OR COALESCE(a.title, '') LIKE ?)
+            """
+        )
+        params.extend([f"%{q}%"] * 4)
+    rows = db.query(
+        f"""
+        SELECT DISTINCT COALESCE(p.current_progress, '') AS progress
+        FROM projects p
+        LEFT JOIN project_sources ps ON ps.project_id=p.id
+        LEFT JOIN articles a ON a.id=ps.article_id
+        WHERE ps.article_id=(
+          SELECT MAX(ps2.article_id) FROM project_sources ps2 WHERE ps2.project_id=p.id
+        ) AND {" AND ".join(conditions)}
+        ORDER BY
+          CASE p.current_progress
+            WHEN '签约/立项' THEN 1 WHEN '签约' THEN 2 WHEN '开工' THEN 3
+            WHEN '铺龙骨' THEN 4 WHEN '开工|铺龙骨' THEN 5
+            WHEN '下水/出坞' THEN 6 WHEN '命名' THEN 7 WHEN '试航' THEN 8
+            WHEN '交付/完工' THEN 9 ELSE 10
+          END,
+          progress
+        """,
+        tuple(params),
+    )
+    return [row["progress"] for row in rows]
 
 def create_app(settings: Settings | None = None) -> FastAPI:
     settings = settings or load_settings()
@@ -63,6 +118,25 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
     app.mount("/static", StaticFiles(directory=str(BASE_DIR / "static")), name="static")
 
+    def wechat_cookie_path() -> Path:
+        configured = os.getenv("SHIPWATCH_WECHAT_COOKIE_FILE")
+        if configured:
+            return Path(configured)
+        if settings.db_path.parent != Path("data"):
+            return settings.db_path.parent / "wechat_cookies.txt"
+        return Path("data/wechat_cookies.txt")
+
+    def reload_wechat_cookie() -> None:
+        settings.wechat_cookie = os.getenv("SHIPWATCH_WECHAT_COOKIE") or load_cookie_file(wechat_cookie_path())
+
+    async def form_data(request: Request) -> dict:
+        return dict(await request.form())
+
+    def redirect_to_wechat_session(msg: str = "", error: str = "") -> RedirectResponse:
+        query = urlencode({k: v for k, v in {"msg": msg, "error": error}.items() if v})
+        suffix = f"?{query}" if query else ""
+        return RedirectResponse(f"/wechat-session{suffix}", status_code=303)
+
     def base_context(request: Request, active: str) -> dict:
         return {
             "request": request,
@@ -70,41 +144,20 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "active": active,
         }
 
-    def wechat_cookie_path() -> Path:
-        configured = os.getenv("SHIPWATCH_WECHAT_COOKIE_FILE")
-        if configured:
-            return Path(configured)
-        return settings.db_path.parent / "wechat_cookies.txt"
-
-    def reload_wechat_cookie() -> None:
-        settings.wechat_cookie = os.getenv("SHIPWATCH_WECHAT_COOKIE") or load_cookie_file(
-            wechat_cookie_path()
-        )
-
-    async def form_data(request: Request) -> dict[str, str]:
-        raw = (await request.body()).decode("utf-8")
-        parsed = parse_qs(raw, keep_blank_values=True)
-        return {key: values[-1] if values else "" for key, values in parsed.items()}
-
-    def redirect_to_wechat_session(**params: object) -> RedirectResponse:
-        query = urlencode({key: value for key, value in params.items() if value is not None})
-        return RedirectResponse(
-            f"/wechat-session?{query}" if query else "/wechat-session",
-            status_code=303,
-        )
+     
 
     @app.get("/", response_class=HTMLResponse)
     def dashboard(
         request: Request,
         yard: str = "",
         progress: str = "",
-        review_status: str = "",
+        review_status: str = "已确认",
         q: str = "",
     ):
         projects = db.project_rows(yard or None, progress or None, review_status or None, q or None)
         metrics = {
             "projects": db.scalar("SELECT COUNT(*) FROM projects") or 0,
-            "starts": db.scalar("SELECT COUNT(*) FROM projects WHERE current_progress='开工'") or 0,
+            "confirmed": db.scalar("SELECT COUNT(*) FROM projects WHERE review_status='已确认'") or 0,
             "reviews": db.scalar("SELECT COUNT(*) FROM projects WHERE review_status='待复核'") or 0,
             "source_errors": db.scalar(
                 "SELECT COUNT(*) FROM crawl_state WHERE last_error IS NOT NULL"
@@ -116,16 +169,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 "projects": projects,
                 "metrics": metrics,
                 "yards": [row[0] for row in db.query("SELECT DISTINCT yard FROM projects ORDER BY yard")],
-                "progresses": [
-                    row[0]
-                    for row in db.query(
-                        """
-                        SELECT DISTINCT current_progress FROM projects
-                        WHERE current_progress IS NOT NULL AND current_progress != ''
-                        ORDER BY 1
-                        """
-                    )
-                ],
+                "progresses": _progress_options(db, yard, review_status, q),
                 "filters": {
                     "yard": yard,
                     "progress": progress,
@@ -158,15 +202,38 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return templates.TemplateResponse(request, "milestones.html", context)
 
     @app.get("/sources", response_class=HTMLResponse)
-    def sources(request: Request, status: str = ""):
+    def sources(request: Request, status: str = "", yard_hint: str = ""):
         sql = "SELECT * FROM articles"
-        params: tuple = ()
+        params: list = []
+        filters = []
         if status:
-            sql += " WHERE fetch_status=?"
-            params = (status,)
+            filters.append("fetch_status=?")
+            params.append(status)
+        if yard_hint:
+            filters.append("yard_hint=?")
+            params.append(yard_hint)
+        if filters:
+            sql += " WHERE " + " AND ".join(filters)
         sql += " ORDER BY fetched_at DESC LIMIT 1000"
         context = base_context(request, "sources")
-        context.update({"rows": db.query(sql, params), "status": status})
+        yards = [row[0] for row in db.query("SELECT DISTINCT yard_hint FROM articles ORDER BY yard_hint")]
+        ok_urls = {
+            row["url"]
+            for row in db.query(
+                """
+                SELECT url FROM articles
+                WHERE fetch_status='ok' AND url LIKE 'https://mp.weixin.qq.com/s/%'
+                """
+            )
+        }
+        rows = []
+        for row in db.query(sql, tuple(params)):
+            item = dict(row)
+            item["open_url"] = normalize_url(item["url"])
+            if item["url"] != item["open_url"] and item["open_url"] in ok_urls:
+                continue
+            rows.append(item)
+        context.update({"rows": rows, "status": status, "yard_hint": yard_hint, "yards": yards})
         return templates.TemplateResponse(request, "sources.html", context)
 
     @app.get("/source-status", response_class=HTMLResponse)
@@ -174,11 +241,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         states = {row["source_key"]: row for row in db.query("SELECT * FROM crawl_state")}
         rows = []
         for source in settings.sources:
-            channels = []
-            if source.website:
-                channels.append(("website", "官网"))
-            if source.wechat:
-                channels.append(("wechat", "微信公众号"))
+            channels = [("wechat", "微信公众号")] if source.wechat else []
             for channel_key, channel_name in channels:
                 state = states.get(f"{source.id}:{channel_key}")
                 if state:
@@ -208,6 +271,97 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         context = base_context(request, "source_status")
         context["rows"] = rows
         return templates.TemplateResponse(request, "source_status.html", context)
+
+    @app.get("/api-usage", response_class=HTMLResponse)
+    def api_usage(request: Request):
+        context = base_context(request, "api_usage")
+        context["totals"] = db.api_usage_totals()
+        context["rows"] = db.api_usage_summary(days=7)
+        return templates.TemplateResponse(request, "api_usage.html", context)
+
+
+    @app.get("/source-config", response_class=HTMLResponse)
+    def source_config(request: Request):
+        import json
+        override_path = Path(os.environ.get("SHIPWATCH_OVERRIDES_FILE", "data/source_overrides.json"))
+        overrides = {}
+        if override_path.exists():
+            overrides = json.loads(override_path.read_text(encoding="utf-8"))
+        items = []
+        custom_ids = {item.get("id") for item in overrides.get("__custom__", [])}
+        for src in settings.sources:
+            if src.id in custom_ids:
+                continue
+            o = overrides.get(src.id, {})
+            accounts = single_wechat_account(o.get("wechat_accounts")) or (
+                single_wechat_account(src.wechat.account_names) if src.wechat else ""
+            )
+            items.append({"id": src.id, "yard": src.yard, "accounts": accounts, "enabled": not o.get("disabled", False)})
+        context = base_context(request, "source_config")
+        custom_items = overrides.get("__custom__", [])
+        for ci in custom_items:
+            ci["accounts"] = single_wechat_account(ci.get("wechat_accounts"))
+        context["items"] = items
+        context["custom_items"] = custom_items
+        return templates.TemplateResponse(request, "source_config.html", context)
+
+    @app.post("/source-config/save")
+    async def source_config_save(request: Request):
+        import json
+        form = await request.form()
+        override_path = Path(os.environ.get("SHIPWATCH_OVERRIDES_FILE", "data/source_overrides.json"))
+        overrides = json.loads(override_path.read_text(encoding="utf-8")) if override_path.exists() else {}
+        # Save custom sources
+        custom_list = []
+        new_account = single_wechat_account(form.get("new_accounts", ""))
+        new_yard = form.get("new_yard", "").strip() or new_account
+        if new_account:
+            existing_ids = {src.id for src in settings.sources}
+            existing_ids.update(item.get("id", "") for item in overrides.get("__custom__", []))
+            nid = _generated_source_id(new_yard, new_account, existing_ids)
+            account = single_wechat_account(form.get("new_accounts", ""))
+            custom_list.append(
+                {
+                    "id": nid,
+                    "yard": new_yard,
+                    "wechat_accounts": [account] if account else [],
+                    "enabled": form.get("cenabled_new") == "1",
+                }
+            )
+        # Keep existing customs
+        for ec in overrides.get("__custom__", []):
+            ec_id = ec["id"]
+            ec["enabled"] = form.get("cenabled_" + ec_id) == "1"
+            account = single_wechat_account(form.get("caccounts_" + ec_id, ""))
+            if account:
+                ec["wechat_accounts"] = [account]
+            custom_list.append(ec)
+        overrides["__custom__"] = custom_list
+
+        for src in settings.sources:
+            o = overrides.get(src.id, {})
+            o["disabled"] = form.get("enabled_" + src.id) != "1"
+            account = single_wechat_account(form.get("accounts_" + src.id, ""))
+            if account:
+                o["wechat_accounts"] = [account]
+            elif "wechat_accounts" in o:
+                del o["wechat_accounts"]
+            overrides[src.id] = o
+        override_path.parent.mkdir(parents=True, exist_ok=True)
+        override_path.write_text(json.dumps(overrides, ensure_ascii=False, indent=2), encoding="utf-8")
+        from fastapi.responses import RedirectResponse
+        return RedirectResponse("/source-config", status_code=303)
+
+    @app.get("/article/{article_id}", response_class=HTMLResponse)
+    def article_detail(request: Request, article_id: int):
+        row = db.query("SELECT * FROM articles WHERE id=?", (article_id,))
+        if not row:
+            return HTMLResponse("文章不存在", status_code=404)
+        context = base_context(request, "sources")
+        article = dict(row[0])
+        article["open_url"] = normalize_url(article["url"])
+        context["article"] = article
+        return templates.TemplateResponse(request, "article.html", context)
 
     @app.get("/wechat-session", response_class=HTMLResponse)
     def wechat_session(request: Request, msg: str = "", error: str = ""):
@@ -275,6 +429,5 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         }
 
     return app
-
 
 app = create_app()

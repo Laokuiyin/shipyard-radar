@@ -16,11 +16,12 @@
       <a class="{{ 'active' if active == 'projects' else '' }}" href="/">项目</a>
       <a class="{{ 'active' if active == 'milestones' else '' }}" href="/milestones">里程碑</a>
       <a class="{{ 'active' if active == 'sources' else '' }}" href="/sources">来源明细</a>
-      <a class="{{ 'active' if active == 'source_status' else '' }}" href="/source-status">采集状态</a>
-      <a class="{{ 'active' if active == 'wechat_session' else '' }}" href="/wechat-session">微信补采</a>
-    </nav>
+     <a class="{{ 'active' if active == 'source_status' else '' }}" href="/source-status">采集状态</a>
+      <a class="{{ 'active' if active == 'api_usage' else '' }}" href="/api-usage">接口用量</a>
+      <a class="{{ 'active' if active == 'source_config' else '' }}" href="/source-config">来源配置</a>
+   </nav>
   </header>
   <main>{% block content %}{% endblock %}</main>
-  <footer>数据仅来自配置的企业官网与官方微信公众号 · 自动抽取结果请结合原文复核</footer>
+  <footer>数据仅来自配置的官方微信公众号 · 自动抽取结果请结合原文复核</footer>
 </body>
 </html>

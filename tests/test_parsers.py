@@ -1,5 +1,6 @@
 from shipwatch.parsers import extract_web_article, extract_wechat_article
 from shipwatch.collector import Collector
+from shipwatch.text import normalize_url
 
 
 def test_extract_web_article():
@@ -39,3 +40,12 @@ def test_resolve_sogou_script_target():
     </script>
     """
     assert Collector._sogou_target(html) == "https://mp.weixin.qq.com/s/abc"
+
+
+def test_normalize_wechat_captcha_url_to_target_article():
+    url = (
+        "https://mp.weixin.qq.com/mp/wappoc_appmsgcaptcha?poc_token=abc"
+        "&target_url=https%3A%2F%2Fmp.weixin.qq.com%2Fs%2FgZULykpwdtdBLiorj5u-uQ"
+    )
+
+    assert normalize_url(url) == "https://mp.weixin.qq.com/s/gZULykpwdtdBLiorj5u-uQ"

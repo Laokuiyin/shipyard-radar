@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="panel article-detail">
+  <div class="panel-head"><div><p class="eyebrow">ARTICLE</p><h2>{{ article.title }}</h2></div>
+    <a class="button secondary" href="/sources">← 返回来源明细</a>
+  </div>
+  <p class="meta">
+    <strong>来源：</strong>{{ article.yard_hint }}
+    &middot; <strong>渠道：</strong>{{ article.channel }}
+    {% if article.account_name %}
+    &middot; <strong>公众号：</strong>{{ article.account_name }}
+    {% endif %}
+    &middot; <strong>抓取时间：</strong>{{ article.fetched_at }}
+    {% if article.published_at %}
+    &middot; <strong>发布时间：</strong>{{ article.published_at }}
+    {% endif %}
+    &middot; <strong>状态：</strong>{{ article.fetch_status }}
+  </p>
+ <div class="article-body">
+   {% if article.content %}
+      {{ article.content | safe }}
+   {% else %}
+     <p class="empty">暂无正文内容</p>
+   {% endif %}
+  </div>
+  {% if article.url %}
+  <p class="meta" style="margin-top:1.5rem;"><strong>原文链接：</strong><a href="{{ article.open_url }}" target="_blank" rel="noopener">{{ article.open_url }}</a></p>
+  {% endif %}
+</section>
+{% endblock %}

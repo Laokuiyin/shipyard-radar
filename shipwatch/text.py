@@ -19,8 +19,20 @@ def clean_text(value: str) -> str:
     return value.strip()
 
 
+def _wechat_captcha_target(parts) -> str | None:
+    if parts.netloc.lower() != "mp.weixin.qq.com" or "appmsgcaptcha" not in parts.path:
+        return None
+    for key, value in parse_qsl(parts.query, keep_blank_values=True):
+        if key == "target_url" and value.startswith("https://mp.weixin.qq.com/"):
+            return value
+    return None
+
+
 def normalize_url(url: str) -> str:
     parts = urlsplit(url.strip())
+    captcha_target = _wechat_captcha_target(parts)
+    if captcha_target:
+        return normalize_url(captcha_target)
     query = [
         (key, value)
         for key, value in parse_qsl(parts.query, keep_blank_values=True)
@@ -60,4 +72,3 @@ def compact_name(value: str | None) -> str:
     value = re.sub(r"[（(].*?[）)]", "", value)
     value = re.sub(r"有限公司|有限责任公司|股份|集团|公司|船舶|造船|重工", "", value)
     return re.sub(r"\W+", "", value).lower()
-

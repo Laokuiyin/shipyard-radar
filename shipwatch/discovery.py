@@ -2,155 +2,138 @@ from __future__ import annotations
 
 import logging
 from datetime import date, timedelta
-from urllib.parse import quote, urlsplit
 
 from shipwatch.config import Settings, SourceConfig
+from shipwatch.db import Database
 from shipwatch.domain import ArticleCandidate
 from shipwatch.fetch import Fetcher
-from shipwatch.parsers import extract_links, looks_like_article, looks_like_list_page, soup
-from shipwatch.text import normalize_url, parse_date
+from shipwatch.text import normalize_url
 
 logger = logging.getLogger(__name__)
 
-
-class WebsiteDiscovery:
-    def __init__(self, settings: Settings, fetcher: Fetcher):
-        self.settings = settings
-        self.fetcher = fetcher
-
-    def discover(self, source: SourceConfig, since: date) -> list[ArticleCandidate]:
-        if source.website is None:
-            return []
-        host = urlsplit(source.website.base_url).hostname or ""
-        queue = list(source.website.seed_urls)
-        visited: set[str] = set()
-        results: dict[str, ArticleCandidate] = {}
-        page_count = 0
-        successful_pages = 0
-        errors: list[str] = []
-
-        while queue and page_count < self.settings.app.max_list_pages_per_source:
-            page_url = normalize_url(queue.pop(0))
-            if page_url in visited:
-                continue
-            visited.add(page_url)
-            try:
-                page = self.fetcher.get(page_url)
-            except Exception as exc:
-                logger.warning("官网列表抓取失败 %s: %s", page_url, exc)
-                errors.append(f"{page_url}: {exc}")
-                continue
-            page_count += 1
-            successful_pages += 1
-            for title, url in extract_links(
-                page.text, page.url, {host, "mp.weixin.qq.com"}
-            ):
-                normalized = normalize_url(url)
-                if normalized in visited:
-                    continue
-                link_host = urlsplit(normalized).hostname or ""
-                if link_host == "mp.weixin.qq.com":
-                    results[normalized] = ArticleCandidate(
-                        source_id=source.id,
-                        yard_hint=source.yard,
-                        channel="微信公众号",
-                        title=title,
-                        url=normalized,
-                    )
-                    continue
-                if looks_like_list_page(title, normalized):
-                    if len(queue) < self.settings.app.max_list_pages_per_source * 4:
-                        queue.append(normalized)
-                    continue
-                if looks_like_article(title, normalized, self.settings.app.relevance_keywords):
-                    published = parse_date(title + " " + normalized)
-                    if published and published < since:
-                        continue
-                    results[normalized] = ArticleCandidate(
-                        source_id=source.id,
-                        yard_hint=source.yard,
-                        channel="官网",
-                        title=title,
-                        url=normalized,
-                        published_at=published,
-                    )
-                elif len(queue) < self.settings.app.max_list_pages_per_source * 3:
-                    if any(word in title for word in ("新闻", "动态", "资讯")):
-                        queue.append(normalized)
-        if successful_pages == 0:
-            raise RuntimeError("；".join(errors) or "官网无可访问页面")
-        return list(results.values())
-
-
 class WechatDiscovery:
-    SEARCH_URL = "https://weixin.sogou.com/weixin?type=2&query={query}&page={page}"
-
-    def __init__(self, settings: Settings, fetcher: Fetcher):
+    DAJIALA_API_URL = "https://www.dajiala.com/fbmain/monitor/v3/post_history"
+    def __init__(
+        self,
+        settings: Settings,
+        fetcher: Fetcher,
+        dajiala_api_key: str | None = None,
+        db: Database | None = None,
+    ):
         self.settings = settings
         self.fetcher = fetcher
+        self.dajiala_api_key = dajiala_api_key
+        self.db = db
 
     def discover(self, source: SourceConfig, since: date) -> list[ArticleCandidate]:
         if source.wechat is None:
             return []
+        if self.dajiala_api_key:
+            try:
+                return self._discover_via_dajiala(source, since)
+            except Exception as exc:
+                logger.warning("打价啦 API 公众号发现失败 %s: %s, 回退到搜狗", source.id, exc)
+        return self._discover_via_sogou(source, since)
+
+    def _discover_via_dajiala(self, source: SourceConfig, since: date) -> list[ArticleCandidate]:
+        import httpx
         results: dict[str, ArticleCandidate] = {}
-        for account in source.wechat.account_names:
-            for page_no in range(1, min(self.settings.app.max_list_pages_per_source, 10) + 1):
-                url = self.SEARCH_URL.format(query=quote(account), page=page_no)
+        cursor = self.db.crawl_cursor(f"{source.id}:wechat") if self.db else {}
+        if not cursor and self.db:
+            cursor = self.db.latest_source_cursor(source.id, "微信公众号")
+        is_new_source = not cursor
+        cursor_date = self._cursor_date(cursor)
+        consecutive_existing = 0
+        stop_after = self.settings.app.discovery_stop_existing_count
+        max_pages = 1 if is_new_source else min(self.settings.app.max_list_pages_per_source, 10)
+        accounts = [account.strip() for account in source.wechat.account_names[:1] if account.strip()]
+        for account in accounts:
+            page = 1
+            while page <= max_pages:
+                resp = None
                 try:
-                    response = self.fetcher.get(url)
+                    resp = httpx.post(
+                        self.DAJIALA_API_URL,
+                        json={"name": account, "page": page, "key": self.dajiala_api_key},
+                        timeout=self.settings.app.request_timeout_seconds,
+                    )
+                    resp.raise_for_status()
+                    data = resp.json()
                 except Exception as exc:
-                    logger.warning("搜狗微信抓取失败 %s: %s", account, exc)
+                    if self.db:
+                        self.db.record_api_call(
+                            "dajiala",
+                            "post_history",
+                            source_id=source.id,
+                            account_name=account,
+                            success=False,
+                            status_code=resp.status_code if resp is not None else None,
+                            error=str(exc),
+                        )
+                    logger.warning("打价啦 API 请求失败 %s page=%s: %s", account, page, exc)
                     break
-                if "请输入验证码" in response.text or "antispider" in response.url:
-                    logger.warning("搜狗微信触发验证: %s", account)
-                    raise RuntimeError(f"搜狗微信触发验证码/反爬验证：{account}")
-                found = self._parse_results(response.text, source, account, since)
-                for item in found:
-                    results[item.url] = item
-                if not found:
+                if self.db:
+                    self.db.record_api_call(
+                        "dajiala",
+                        "post_history",
+                        source_id=source.id,
+                        account_name=account,
+                        success=data.get("code") == 0,
+                        status_code=resp.status_code,
+                        error=None if data.get("code") == 0 else str(data.get("msg")),
+                    )
+                if data.get("code") != 0:
+                    logger.warning("打价啦 API 返回异常: %s", data.get("msg"))
                     break
+                articles = data.get("data") or []
+                if not articles:
+                    break
+                for item in articles:
+                    url = normalize_url(item.get("url", ""))
+                    if not url:
+                        continue
+                    title = (item.get("title") or "").strip()
+                    if not title:
+                        continue
+                    post_time = item.get("post_time")
+                    published = None
+                    if post_time:
+                        from datetime import datetime
+                        published = datetime.fromtimestamp(post_time).date()
+                    exists = self.db.article_exists(url) if self.db else False
+                    if exists and (cursor_date is None or (published and published <= cursor_date)):
+                        consecutive_existing += 1
+                    else:
+                        consecutive_existing = 0
+                    results[url] = ArticleCandidate(
+                        source_id=source.id,
+                        yard_hint=source.yard,
+                        channel="微信公众号",
+                        title=title,
+                        url=url,
+                        published_at=published,
+                        account_name=account,
+                    )
+                    if stop_after and consecutive_existing >= stop_after:
+                        return list(results.values())
+                page += 1
         return list(results.values())
 
+    def _discover_via_sogou(self, source: SourceConfig, since: date) -> list[ArticleCandidate]:
+        logger.warning("搜狗微信发现未启用，来源 %s 本轮仅保留打价啦结果", source.id)
+        return []
+
     @staticmethod
-    def _parse_results(
-        html: str, source: SourceConfig, expected_account: str, since: date
-    ) -> list[ArticleCandidate]:
-        doc = soup(html)
-        items: list[ArticleCandidate] = []
-        for block in doc.select("li[id^='sogou_vr_'], .news-box li"):
-            account_node = block.select_one(".account, .s-p a, .all-time-y2")
-            actual_account = (
-                account_node.get_text(" ", strip=True) if account_node else expected_account
-            )
-            if not any(name in actual_account or actual_account in name for name in source.wechat.account_names):
-                continue
-            anchor = block.select_one("h3 a[href], .txt-box h3 a[href]")
-            if not anchor:
-                continue
-            href = anchor.get("href", "")
-            if href.startswith("/link?"):
-                href = "https://weixin.sogou.com" + href
-            published = parse_date(block.get_text(" ", strip=True))
-            if published and published < since:
-                continue
-            title = anchor.get_text(" ", strip=True)
-            if not any(keyword in title + block.get_text(" ", strip=True) for keyword in (
-                "船", "项目", "开工", "交付", "签约", "下水", "试航", "龙骨", "出坞"
-            )):
-                continue
-            items.append(
-                ArticleCandidate(
-                    source_id=source.id,
-                    yard_hint=source.yard,
-                    channel="微信公众号",
-                    title=title,
-                    url=href,
-                    published_at=published,
-                    account_name=actual_account,
-                )
-            )
-        return items
+    def _cursor_date(cursor: dict) -> date | None:
+        raw = cursor.get("last_seen_published_at")
+        if not raw:
+            return None
+        try:
+            return date.fromisoformat(raw)
+        except ValueError:
+            return None
 
 
-def default_since(settings: Settings) -> date:
+def default_since(settings):
+    from datetime import date, timedelta
     return date.today() - timedelta(days=settings.app.lookback_days)

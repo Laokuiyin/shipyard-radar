@@ -6,9 +6,9 @@ After=network.target
 Type=simple
 User=root
 Group=root
-WorkingDirectory=/opt/shipyard-radar
-EnvironmentFile=/opt/shipyard-radar/.env
-ExecStart=/opt/shipyard-radar/.venv/bin/shipwatch web --host 0.0.0.0 --port 7890
+WorkingDirectory=/opt/shipyard-radar-main
+EnvironmentFile=/opt/shipyard-radar-main/.env
+ExecStart=/opt/shipyard-radar-main/venv/bin/python -m shipwatch.cli web --host 0.0.0.0 --port 7890
 Restart=always
 RestartSec=5
 

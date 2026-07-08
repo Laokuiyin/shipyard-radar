@@ -1,0 +1,14 @@
+[Unit]
+Description=Shipyard Radar Daily Collection
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+WorkingDirectory=/opt/shipyard-radar-main
+EnvironmentFile=/opt/shipyard-radar-main/.env
+ExecStart=/opt/shipyard-radar-main/venv/bin/python -m shipwatch.cli daily
+StandardOutput=append:/opt/shipyard-radar-main/data/daily.log
+StandardError=append:/opt/shipyard-radar-main/data/daily.log

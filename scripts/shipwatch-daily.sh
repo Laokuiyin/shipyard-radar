@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-PROJECT_DIR="${SHIPWATCH_PROJECT_DIR:-/opt/shipwatch}"
+PROJECT_DIR="${SHIPWATCH_PROJECT_DIR:-/opt/shipyard-radar-main}"
 cd "$PROJECT_DIR"
 
-mkdir -p logs
+mkdir -p data
 if [[ -f .env ]]; then
   set -a
   # shellcheck disable=SC1091
@@ -12,5 +12,4 @@ if [[ -f .env ]]; then
   set +a
 fi
 
-"$PROJECT_DIR/.venv/bin/shipwatch" daily >> logs/daily.log 2>&1
-
+"$PROJECT_DIR/venv/bin/python" -m shipwatch.cli daily >> data/daily.log 2>&1

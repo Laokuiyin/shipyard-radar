@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from datetime import datetime
 
 from shipwatch.db import Database
@@ -152,6 +153,21 @@ class ProjectMerger:
                     ),
                 )
                 project_id = int(cursor.lastrowid)
+
+            # Store project_key in article's extraction_json for source lookup
+            row = conn.execute(
+                "SELECT extraction_json FROM articles WHERE id=?", (article_id,)
+            ).fetchone()
+            if row and row[0]:
+                try:
+                    payload = json.loads(row[0])
+                    payload["project_key"] = key
+                    conn.execute(
+                        "UPDATE articles SET extraction_json=? WHERE id=?",
+                        (json.dumps(payload, ensure_ascii=False), article_id),
+                    )
+                except (json.JSONDecodeError, TypeError):
+                    pass
 
             conn.execute(
                 """

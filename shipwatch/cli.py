@@ -18,13 +18,14 @@ def build_parser() -> argparse.ArgumentParser:
 
     collect = sub.add_parser("collect", help="发现并采集文章")
     collect.add_argument("--since", help="起始日期 YYYY-MM-DD")
-    collect.add_argument("--website-only", action="store_true")
-    collect.add_argument("--wechat-only", action="store_true")
+    collect.add_argument("--source", help="只处理指定来源ID，多个用逗号隔开")
+    collect.add_argument("--website-only", action="store_true", help="兼容旧参数；官网采集已关闭")
+    collect.add_argument("--wechat-only", action="store_true", help="兼容旧参数；当前默认仅采集公众号")
     refetch = sub.add_parser("refetch-wechat", help="使用授权 Cookie 重试公众号正文")
     refetch.add_argument("--source", help="只重试某个来源ID")
     refetch.add_argument("--limit", type=int, default=100)
 
-    add = sub.add_parser("add-url", help="人工补充官网或微信文章链接")
+    add = sub.add_parser("add-url", help="人工补充微信公众号原文链接")
     add.add_argument("url")
     add.add_argument("--source", required=True, help="来源ID，例如 hudong_zhonghua")
     add.add_argument("--title", default="人工补充链接")
@@ -55,8 +56,9 @@ def main() -> None:
         since = date.fromisoformat(args.since) if args.since else None
         result = pipeline.discover_and_collect(
             since=since,
-            websites=not args.wechat_only,
-            wechat=not args.website_only,
+            websites=False,
+            wechat=True,
+            source_ids=args.source.split(",") if args.source else None,
         )
         print(result)
     elif args.command == "refetch-wechat":

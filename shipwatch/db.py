@@ -3,11 +3,11 @@ from __future__ import annotations
 import json
 import sqlite3
 from contextlib import contextmanager
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Iterator
 
-from shipwatch.domain import Article, Extraction
+from shipwatch.domain import Article, ArticleCandidate, Extraction
 from shipwatch.text import iso_date
 
 
@@ -32,6 +32,11 @@ CREATE TABLE IF NOT EXISTS articles (
     extraction_status TEXT NOT NULL DEFAULT 'pending',
     extraction_json TEXT,
     relevant INTEGER,
+    discovered_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    first_seen_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    last_seen_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    body_fetch_attempts INTEGER NOT NULL DEFAULT 0,
+    next_retry_at TEXT,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
@@ -85,6 +90,25 @@ CREATE TABLE IF NOT EXISTS crawl_state (
     result_count INTEGER,
     cursor TEXT
 );
+
+CREATE TABLE IF NOT EXISTS api_usage (
+    id INTEGER PRIMARY KEY,
+    called_at TEXT NOT NULL,
+    provider TEXT NOT NULL,
+    endpoint TEXT NOT NULL,
+    source_id TEXT,
+    account_name TEXT,
+    article_url TEXT,
+    success INTEGER NOT NULL,
+    status_code INTEGER,
+    error TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_api_usage_called_at
+ON api_usage(called_at);
+
+CREATE INDEX IF NOT EXISTS idx_api_usage_endpoint
+ON api_usage(endpoint, source_id);
 """
 
 
@@ -114,15 +138,90 @@ class Database:
                 conn.execute("ALTER TABLE crawl_state ADD COLUMN last_attempt_at TEXT")
             if "result_count" not in columns:
                 conn.execute("ALTER TABLE crawl_state ADD COLUMN result_count INTEGER")
+            article_columns = {
+                row["name"] for row in conn.execute("PRAGMA table_info(articles)")
+            }
+            migrations = {
+                "discovered_at": "ALTER TABLE articles ADD COLUMN discovered_at TEXT",
+                "first_seen_at": "ALTER TABLE articles ADD COLUMN first_seen_at TEXT",
+                "last_seen_at": "ALTER TABLE articles ADD COLUMN last_seen_at TEXT",
+                "body_fetch_attempts": (
+                    "ALTER TABLE articles ADD COLUMN body_fetch_attempts INTEGER NOT NULL DEFAULT 0"
+                ),
+                "next_retry_at": "ALTER TABLE articles ADD COLUMN next_retry_at TEXT",
+            }
+            for column, sql in migrations.items():
+                if column not in article_columns:
+                    conn.execute(sql)
+            now = datetime.now().isoformat()
+            conn.execute("UPDATE articles SET discovered_at=COALESCE(discovered_at, created_at, ?)", (now,))
+            conn.execute("UPDATE articles SET first_seen_at=COALESCE(first_seen_at, created_at, ?)", (now,))
+            conn.execute("UPDATE articles SET last_seen_at=COALESCE(last_seen_at, updated_at, ?)", (now,))
 
-    def upsert_article(self, article: Article) -> int:
+    def article_exists(self, url: str) -> bool:
+        return bool(self.scalar("SELECT 1 FROM articles WHERE url=? LIMIT 1", (url,)))
+
+    def latest_source_cursor(self, source_id: str, channel: str) -> dict:
+        rows = self.query(
+            """
+            SELECT published_at, url
+            FROM articles
+            WHERE source_id=? AND channel=?
+            ORDER BY COALESCE(published_at, first_seen_at, fetched_at) DESC, id DESC
+            LIMIT 1
+            """,
+            (source_id, channel),
+        )
+        if not rows:
+            return {}
+        return {
+            "last_seen_published_at": rows[0]["published_at"],
+            "last_seen_url": rows[0]["url"],
+        }
+
+    def upsert_discovered_article(self, candidate: ArticleCandidate) -> int:
+        now = datetime.now().isoformat()
         with self.connect() as conn:
             conn.execute(
                 """
                 INSERT INTO articles (
                     source_id, yard_hint, channel, account_name, title, url,
-                    published_at, fetched_at, content, content_hash, fetch_status, fetch_error
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    published_at, fetched_at, content, fetch_status,
+                    discovered_at, first_seen_at, last_seen_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, '', 'discovered', ?, ?, ?)
+                ON CONFLICT(url) DO UPDATE SET
+                    title=COALESCE(NULLIF(excluded.title, ''), articles.title),
+                    published_at=COALESCE(excluded.published_at, articles.published_at),
+                    account_name=COALESCE(excluded.account_name, articles.account_name),
+                    last_seen_at=excluded.last_seen_at,
+                    updated_at=CURRENT_TIMESTAMP
+                """,
+                (
+                    candidate.source_id,
+                    candidate.yard_hint,
+                    candidate.channel,
+                    candidate.account_name,
+                    candidate.title,
+                    candidate.url,
+                    iso_date(candidate.published_at),
+                    now,
+                    now,
+                    now,
+                    now,
+                ),
+            )
+            return int(conn.execute("SELECT id FROM articles WHERE url=?", (candidate.url,)).fetchone()[0])
+
+    def upsert_article(self, article: Article) -> int:
+        retry_after = self._next_retry_at(article.fetch_status)
+        with self.connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO articles (
+                    source_id, yard_hint, channel, account_name, title, url,
+                    published_at, fetched_at, content, content_hash, fetch_status,
+                    fetch_error, body_fetch_attempts, next_retry_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)
                 ON CONFLICT(url) DO UPDATE SET
                     title=excluded.title,
                     published_at=COALESCE(excluded.published_at, articles.published_at),
@@ -131,6 +230,8 @@ class Database:
                     content_hash=COALESCE(excluded.content_hash, articles.content_hash),
                     fetch_status=excluded.fetch_status,
                     fetch_error=excluded.fetch_error,
+                    body_fetch_attempts=articles.body_fetch_attempts + 1,
+                    next_retry_at=?,
                     updated_at=CURRENT_TIMESTAMP
                 """,
                 (
@@ -146,9 +247,47 @@ class Database:
                     article.content_hash,
                     article.fetch_status,
                     article.fetch_error,
+                    retry_after,
+                    retry_after,
                 ),
             )
-            return int(conn.execute("SELECT id FROM articles WHERE url=?", (article.url,)).fetchone()[0])
+            row = conn.execute("SELECT id, body_fetch_attempts FROM articles WHERE url=?", (article.url,)).fetchone()
+            article_id = int(row["id"])
+            if article.fetch_status == "ok":
+                conn.execute("UPDATE articles SET next_retry_at=NULL WHERE id=?", (article_id,))
+            elif retry_after is None:
+                attempts = int(row["body_fetch_attempts"] or 1)
+                conn.execute(
+                    "UPDATE articles SET next_retry_at=? WHERE id=?",
+                    (self._next_retry_at(article.fetch_status, attempts), article_id),
+                )
+            return article_id
+
+    def pending_body_fetch_articles(
+        self,
+        limit: int | None = None,
+        source_ids: list[str] | None = None,
+    ) -> list[sqlite3.Row]:
+        params: list[object] = []
+        source_filter = ""
+        if source_ids:
+            placeholders = ",".join("?" for _ in source_ids)
+            source_filter = f" AND source_id IN ({placeholders})"
+            params.extend(source_ids)
+        sql = """
+            SELECT * FROM articles
+            WHERE fetch_status IN ('discovered', 'partial', 'blocked', 'error')
+              AND channel='微信公众号'
+              AND (next_retry_at IS NULL OR next_retry_at <= CURRENT_TIMESTAMP)
+              {source_filter}
+            ORDER BY
+              CASE fetch_status WHEN 'discovered' THEN 0 ELSE 1 END,
+              COALESCE(published_at, first_seen_at, fetched_at)
+        """.format(source_filter=source_filter)
+        if limit:
+            sql += " LIMIT ?"
+            params.append(limit)
+        return self.query(sql, tuple(params))
 
     def pending_articles(self, retry_errors: bool = False) -> list[sqlite3.Row]:
         condition = "fetch_status IN ('ok', 'partial')" if retry_errors else "fetch_status='ok'"
@@ -208,24 +347,106 @@ class Database:
             )
 
     def set_crawl_state(
-        self, source_key: str, error: str | None = None, result_count: int | None = None
+        self,
+        source_key: str,
+        error: str | None = None,
+        result_count: int | None = None,
+        cursor: dict | None = None,
     ) -> None:
         now = datetime.now().isoformat()
+        cursor_json = json.dumps(cursor, ensure_ascii=False) if cursor is not None else None
         with self.connect() as conn:
             conn.execute(
                 """
                 INSERT INTO crawl_state(
-                  source_key, last_attempt_at, last_success_at, last_error, result_count
+                  source_key, last_attempt_at, last_success_at, last_error, result_count, cursor
                 )
-                VALUES (?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?)
                 ON CONFLICT(source_key) DO UPDATE SET
                   last_attempt_at=excluded.last_attempt_at,
                   last_success_at=excluded.last_success_at,
                   last_error=excluded.last_error,
-                  result_count=excluded.result_count
+                  result_count=excluded.result_count,
+                  cursor=COALESCE(excluded.cursor, crawl_state.cursor)
                 """,
-                (source_key, now, None if error else now, error, result_count),
+                (source_key, now, None if error else now, error, result_count, cursor_json),
             )
+
+    def crawl_cursor(self, source_key: str) -> dict:
+        raw = self.scalar("SELECT cursor FROM crawl_state WHERE source_key=?", (source_key,))
+        if not raw:
+            return {}
+        try:
+            return json.loads(raw)
+        except json.JSONDecodeError:
+            return {}
+
+    def record_api_call(
+        self,
+        provider: str,
+        endpoint: str,
+        source_id: str | None = None,
+        account_name: str | None = None,
+        article_url: str | None = None,
+        success: bool = False,
+        status_code: int | None = None,
+        error: str | None = None,
+    ) -> None:
+        with self.connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO api_usage(
+                  called_at, provider, endpoint, source_id, account_name,
+                  article_url, success, status_code, error
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    datetime.now().isoformat(),
+                    provider,
+                    endpoint,
+                    source_id,
+                    account_name,
+                    article_url,
+                    int(success),
+                    status_code,
+                    error[:1000] if error else None,
+                ),
+            )
+
+    def api_usage_summary(self, days: int = 7) -> list[sqlite3.Row]:
+        return self.query(
+            """
+            SELECT substr(called_at, 1, 10) AS day, endpoint, source_id, account_name,
+                   COUNT(*) AS calls,
+                   SUM(CASE WHEN success THEN 1 ELSE 0 END) AS success_count,
+                   SUM(CASE WHEN NOT success THEN 1 ELSE 0 END) AS failed_count
+            FROM api_usage
+            WHERE called_at >= datetime('now', ?)
+            GROUP BY day, endpoint, source_id, account_name
+            ORDER BY day DESC, endpoint, source_id, account_name
+            """,
+            (f"-{days} days",),
+        )
+
+    def api_usage_totals(self) -> dict:
+        rows = self.query(
+            """
+            SELECT endpoint,
+                   SUM(CASE WHEN substr(called_at, 1, 10)=date('now') THEN 1 ELSE 0 END) AS today,
+                   SUM(CASE WHEN called_at >= datetime('now', '-7 days') THEN 1 ELSE 0 END) AS week,
+                   COUNT(*) AS total
+            FROM api_usage
+            GROUP BY endpoint
+            """
+        )
+        return {row["endpoint"]: dict(row) for row in rows}
+
+    @staticmethod
+    def _next_retry_at(status: str, attempts: int = 1) -> str | None:
+        if status in {"ok", "discovered"}:
+            return None
+        days = (1, 3, 7, 14)[min(max(attempts - 1, 0), 3)]
+        return (datetime.now() + timedelta(days=days)).isoformat()
 
     def query(self, sql: str, params: tuple = ()) -> list[sqlite3.Row]:
         with self.connect() as conn:
@@ -250,7 +471,7 @@ class Database:
             params.append(yard)
         if progress:
             conditions.append("COALESCE(p.current_progress, '')=?")
-            params.append(progress)
+            params.append("" if progress == "__empty__" else progress)
         if review_status:
             conditions.append("p.review_status=?")
             params.append(review_status)
