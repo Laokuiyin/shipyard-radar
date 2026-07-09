@@ -192,6 +192,8 @@ def test_dashboard_defaults_to_confirmed_and_scopes_progress_options(tmp_path):
     assert "待复核船东" not in page.text
     assert "<span>已确认</span>" in page.text
     assert "<span>待复核</span>" in page.text
+    assert "<span>无关</span>" in page.text
     assert 'option value="已确认" selected' in page.text
+    assert 'option value="无关"' in page.text
     assert 'option value="开工"' in page.text
     assert 'option value="命名"' not in page.text

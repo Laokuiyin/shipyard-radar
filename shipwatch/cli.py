@@ -83,6 +83,9 @@ def main() -> None:
                 "pending_review": pipeline.db.scalar(
                     "SELECT COUNT(*) FROM projects WHERE review_status='待复核'"
                 ),
+                "irrelevant": pipeline.db.scalar(
+                    "SELECT COUNT(*) FROM projects WHERE review_status='无关'"
+                ),
             }
         )
 

@@ -17,6 +17,14 @@ PROGRESS_RANK = {
     "交付/完工": 60,
 }
 
+REVIEW_STATUSES = {"已确认", "待复核", "无关"}
+
+
+def review_status_for(extraction: Extraction) -> str:
+    if extraction.review_status in REVIEW_STATUSES:
+        return extraction.review_status
+    return "已确认" if extraction.confidence >= 0.82 and not extraction.review_reason else "待复核"
+
 
 def project_key(extraction: Extraction, article_id: int) -> str:
     parts = [
@@ -42,7 +50,7 @@ class ProjectMerger:
         now = datetime.now().isoformat()
         with self.db.connect() as conn:
             existing = conn.execute("SELECT * FROM projects WHERE project_key=?", (key,)).fetchone()
-            review_status = "已确认" if extraction.confidence >= 0.82 and not extraction.review_reason else "待复核"
+            review_status = review_status_for(extraction)
             if existing:
                 conflicts = []
                 incoming_ship_count = extraction.ship_count
@@ -101,7 +109,12 @@ class ProjectMerger:
                       start_date=COALESCE(?, start_date),
                       completion_date=COALESCE(?, completion_date),
                       confidence=MAX(confidence, ?),
-                      review_status=CASE WHEN ?='待复核' THEN '待复核' ELSE review_status END,
+                      review_status=CASE
+                        WHEN ?='待复核' THEN '待复核'
+                        WHEN ?='无关' THEN '无关'
+                        WHEN review_status!='待复核' THEN ?
+                        ELSE review_status
+                      END,
                       review_reason=COALESCE(?, review_reason),
                       last_seen_at=?,
                       last_changed_at=CASE WHEN ? THEN ? ELSE last_changed_at END
@@ -116,6 +129,8 @@ class ProjectMerger:
                         iso_date(extraction.start_date),
                         iso_date(extraction.completion_date),
                         extraction.confidence,
+                        review_status,
+                        review_status,
                         review_status,
                         extraction.review_reason,
                         now,

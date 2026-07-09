@@ -133,6 +133,10 @@ EXTRACTION_SCHEMA: dict[str, Any] = {
         "start_date": {"type": ["string", "null"]},
         "completion_date": {"type": ["string", "null"]},
         "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+        "review_status": {
+            "type": ["string", "null"],
+            "enum": ["已确认", "待复核", "无关", None],
+        },
         "review_reason": {"type": ["string", "null"]},
         "milestones": {
             "type": "array",
@@ -156,7 +160,7 @@ EXTRACTION_SCHEMA: dict[str, Any] = {
     "required": [
         "relevant", "yard", "owner_project", "ship_type", "ship_count",
         "series_identifier", "current_progress", "start_date", "completion_date",
-        "confidence", "review_reason", "milestones",
+        "confidence", "review_status", "review_reason", "milestones",
     ],
 }
 
@@ -228,6 +232,7 @@ class LLMExtractor:
   "start_date": "YYYY-MM-DD或null",
   "completion_date": "YYYY-MM-DD或null",
   "confidence": 0.9,
+  "review_status": "已确认|待复核|无关",
   "review_reason": "需复核原因或null",
   "milestones": [
     {{
@@ -240,6 +245,11 @@ class LLMExtractor:
   ]
 }}
 排除军用舰艇、党建、人事、一般经营新闻。不得猜测未披露字段。
+复核状态划分：
+- 已确认：目标范围内的民用新船/海工项目，且船厂、船东/项目、船型/船数或关键节点较明确。
+- 待复核：可能相关，但字段不完整、来源语义含糊、存在冲突或置信度不足。
+- 无关：不是目标新船/海工项目，例如党建、人事、荣誉奖项、展会、招聘、标准发布、设备/系统订单、码头设备交付、市场评论、维修改造、非目标船厂项目等。
+若 review_status 为“无关”，relevant 应为 false，项目字段尽量为 null。
 “船数”指整个已披露订单/批次的艘数；单船节点不要误写成整个订单只有1艘。
 日期输出 YYYY-MM-DD；预计日期设置里程碑 is_expected=true。
 每个关键字段都应能由 evidence 的短原文片段支撑。
@@ -276,6 +286,7 @@ class LLMExtractor:
             start_date=parsed(data.get("start_date")),
             completion_date=parsed(data.get("completion_date")),
             confidence=float(data.get("confidence", 0)),
+            review_status=data.get("review_status"),
             review_reason=data.get("review_reason"),
             milestones=[
                 Milestone(

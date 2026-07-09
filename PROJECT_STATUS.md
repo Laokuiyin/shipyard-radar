@@ -33,7 +33,7 @@
 ### 信息处理
 
 - 使用 DeepSeek OpenAI 兼容接口进行 JSON 结构化抽取。
-- 当前模型为 `deepseek-v4-flash`，调用方式为 Chat Completions。
+- 当前线上模型为 `deepseek-chat`，调用方式为 Chat Completions。
 - 无模型密钥时自动降级为本地规则抽取。
 - 排除常见军用舰艇、党建、人事等非目标信息。
 - 按船厂、船东/项目、船型和系列标识合并项目与里程碑。

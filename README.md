@@ -30,19 +30,21 @@ venv/bin/python -m shipwatch.cli init
 
 ## 模型配置
 
-默认使用 Responses API 风格的 OpenAI 兼容接口：
+默认使用 Chat Completions 风格的 OpenAI 兼容接口，适配 DeepSeek：
 
 ```dotenv
 OPENAI_API_KEY=...
+OPENAI_BASE_URL=https://api.deepseek.com
+OPENAI_MODEL=deepseek-chat
+OPENAI_API_MODE=chat_completions
+```
+
+如果改用支持 Responses API 的 OpenAI 官方模型，可以显式切换：
+
+```dotenv
 OPENAI_BASE_URL=https://api.openai.com/v1
 OPENAI_MODEL=gpt-5-mini
 OPENAI_API_MODE=responses
-```
-
-如果兼容服务只实现 Chat Completions：
-
-```dotenv
-OPENAI_API_MODE=chat_completions
 ```
 
 不配置 `OPENAI_API_KEY` 时，系统仍可运行，但复杂字段的准确率较低，结果更容易进入“待人工复核”。

@@ -1,7 +1,7 @@
 from datetime import date
 
 from shipwatch.config import load_settings
-from shipwatch.extract import RuleExtractor
+from shipwatch.extract import LLMExtractor, RuleExtractor
 
 
 def test_rule_extractor_finds_project():
@@ -40,3 +40,26 @@ def test_rule_extractor_does_not_treat_company_name_as_ship_type():
     assert result.ship_type
     assert result.ship_type != "厦船"
     assert "油化船" in result.ship_type
+
+
+def test_llm_extractor_parses_review_status():
+    result = LLMExtractor._from_dict(
+        {
+            "relevant": False,
+            "yard": None,
+            "owner_project": None,
+            "ship_type": None,
+            "ship_count": None,
+            "series_identifier": None,
+            "current_progress": None,
+            "start_date": None,
+            "completion_date": None,
+            "confidence": 0.92,
+            "review_status": "无关",
+            "review_reason": "党建新闻，不是新船项目",
+            "milestones": [],
+        }
+    )
+
+    assert result.review_status == "无关"
+    assert result.review_reason == "党建新闻，不是新船项目"

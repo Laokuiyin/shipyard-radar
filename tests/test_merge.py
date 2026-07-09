@@ -72,3 +72,23 @@ def test_conflicting_ship_count_is_flagged_without_overwrite(tmp_path):
     assert db.scalar("SELECT ship_count FROM projects") == 4
     assert db.scalar("SELECT review_status FROM projects") == "待复核"
     assert "船数冲突" in db.scalar("SELECT review_reason FROM projects")
+
+
+def test_merge_accepts_llm_irrelevant_review_status(tmp_path):
+    db = Database(tmp_path / "test.db")
+    db.init()
+    merger = ProjectMerger(db)
+    extraction = Extraction(
+        relevant=True,
+        yard="武昌船舶重工",
+        owner_project="党建活动",
+        ship_type="宣传报道",
+        current_progress="交付/完工",
+        confidence=0.95,
+        review_status="无关",
+        review_reason="DeepSeek 判定为非新船/海工项目",
+    )
+
+    merger.merge(article(db, "https://example.com/irrelevant"), extraction)
+
+    assert db.scalar("SELECT review_status FROM projects") == "无关"

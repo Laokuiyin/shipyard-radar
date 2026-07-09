@@ -4,6 +4,7 @@
   <article><span>项目候选</span><strong>{{ metrics.projects }}</strong></article>
   <article><span>已确认</span><strong>{{ metrics.confirmed }}</strong></article>
   <article><span>待复核</span><strong>{{ metrics.reviews }}</strong></article>
+  <article><span>无关</span><strong>{{ metrics.irrelevant }}</strong></article>
   <article class="{{ 'warn' if metrics.source_errors else '' }}"><span>来源异常</span><strong>{{ metrics.source_errors }}</strong></article>
 </section>
 
@@ -31,7 +32,7 @@
     <label>复核状态
       <select name="review_status">
         <option value="">全部状态</option>
-        {% for item in ['已确认', '待复核'] %}<option value="{{ item }}" {{ 'selected' if filters.review_status == item else '' }}>{{ item }}</option>{% endfor %}
+        {% for item in ['已确认', '待复核', '无关'] %}<option value="{{ item }}" {{ 'selected' if filters.review_status == item else '' }}>{{ item }}</option>{% endfor %}
       </select>
     </label>
     <label class="search">关键词
@@ -56,7 +57,7 @@
           <td><span class="badge progress">{{ row.current_progress or '未确定' }}</span></td>
           <td>{{ row.start_date or '—' }}</td>
           <td>{{ row.completion_date or '—' }}</td>
-          <td><span class="badge {{ 'review' if row.review_status == '待复核' else 'ok' }}">{{ row.review_status }}</span></td>
+          <td><span class="badge {{ 'irrelevant' if row.review_status == '无关' else ('review' if row.review_status == '待复核' else 'ok') }}">{{ row.review_status }}</span></td>
           <td>{% if row.source_url %}<a class="source-link" target="_blank" rel="noopener" href="{{ row.source_url }}">{{ row.source_title or '查看原文' }}</a>{% else %}—{% endif %}</td>
         </tr>
       {% else %}

@@ -143,6 +143,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "projects": db.scalar("SELECT COUNT(*) FROM projects") or 0,
             "confirmed": db.scalar("SELECT COUNT(*) FROM projects WHERE review_status='已确认'") or 0,
             "reviews": db.scalar("SELECT COUNT(*) FROM projects WHERE review_status='待复核'") or 0,
+            "irrelevant": db.scalar("SELECT COUNT(*) FROM projects WHERE review_status='无关'") or 0,
             "source_errors": db.scalar(
                 "SELECT COUNT(*) FROM crawl_state WHERE last_error IS NOT NULL"
             ) or 0,

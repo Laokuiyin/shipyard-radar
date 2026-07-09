@@ -56,5 +56,6 @@ class Extraction:
     completion_date: date | None = None
     milestones: list[Milestone] = field(default_factory=list)
     confidence: float = 0.0
+    review_status: str | None = None
     review_reason: str | None = None
     raw: dict[str, Any] = field(default_factory=dict)
