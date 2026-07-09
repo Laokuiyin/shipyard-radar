@@ -132,6 +132,26 @@ journalctl -u shipwatch-daily -f
 
 `来源采集状态` 会逐项列出各公众号来源的成功、部分失败、失败、未执行或“发现成功 / 正文获取失败”状态，以及最后执行时间、发现数量和规范化失败原因。
 
+## 增量发现与接口日志
+
+`post_history` 是分页接口。系统对每个公众号从 `page=1` 开始读取，遇到连续
+`discovery_stop_existing_count` 篇已存在且不晚于当前游标的旧文章后停止翻页。
+当前默认值为 `5`，可在 `config.yaml` 的 `app.discovery_stop_existing_count`
+中调整。
+
+系统同时保存两个时间字段：
+
+- `published_at`：日期，用于页面展示和抽取上下文。
+- `published_at_ts`：秒级发布时间，用于增量游标和翻页停止判断。
+
+`crawl_state.cursor` 会记录 `last_seen_published_at`、`last_seen_published_at_ts`
+和 `last_seen_url`。旧游标没有秒级字段时，系统会兼容回退到日期判断；下一轮
+成功采集后会自动写入秒级游标。
+
+接口用量页会展示 `request_meta` 参数。`post_history` 会记录 `page=1`、
+`page=2` 等页码，因此同一公众号一天出现多条 `post_history` 调用通常表示
+正常翻页，而不是同一页重复请求。历史调用记录在该字段上线前没有页码参数。
+
 ## 公众号采集边界
 
 微信公众号没有稳定的公开文章列表 API。系统优先通过打价啦 API 发现并获取公众号文章；若正文获取失败，会记录错误并继续处理其他来源，不自动破解或绕过验证，也不保存或使用微信 Cookie。可以用 `add-url` 补充漏掉的官方原文。

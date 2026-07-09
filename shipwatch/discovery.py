@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 
 from shipwatch.config import Settings, SourceConfig
 from shipwatch.db import Database
@@ -42,6 +42,7 @@ class WechatDiscovery:
         if not cursor and self.db:
             cursor = self.db.latest_source_cursor(source.id, "微信公众号")
         is_new_source = not cursor
+        cursor_dt = self._cursor_datetime(cursor)
         cursor_date = self._cursor_date(cursor)
         consecutive_existing = 0
         stop_after = self.settings.app.discovery_stop_existing_count
@@ -66,6 +67,7 @@ class WechatDiscovery:
                             "post_history",
                             source_id=source.id,
                             account_name=account,
+                            request_meta=f"page={page}",
                             success=False,
                             status_code=resp.status_code if resp is not None else None,
                             error=str(exc),
@@ -78,6 +80,7 @@ class WechatDiscovery:
                         "post_history",
                         source_id=source.id,
                         account_name=account,
+                        request_meta=f"page={page}",
                         success=data.get("code") == 0,
                         status_code=resp.status_code,
                         error=None if data.get("code") == 0 else str(data.get("msg")),
@@ -97,11 +100,12 @@ class WechatDiscovery:
                         continue
                     post_time = item.get("post_time")
                     published = None
+                    published_ts = None
                     if post_time:
-                        from datetime import datetime
-                        published = datetime.fromtimestamp(post_time).date()
+                        published_ts = datetime.fromtimestamp(post_time)
+                        published = published_ts.date()
                     exists = self.db.article_exists(url) if self.db else False
-                    if exists and (cursor_date is None or (published and published <= cursor_date)):
+                    if exists and self._at_or_before_cursor(published_ts, published, cursor_dt, cursor_date):
                         consecutive_existing += 1
                     else:
                         consecutive_existing = 0
@@ -112,6 +116,7 @@ class WechatDiscovery:
                         title=title,
                         url=url,
                         published_at=published,
+                        published_at_ts=published_ts,
                         account_name=account,
                     )
                     if stop_after and consecutive_existing >= stop_after:
@@ -132,6 +137,29 @@ class WechatDiscovery:
             return date.fromisoformat(raw)
         except ValueError:
             return None
+
+    @staticmethod
+    def _cursor_datetime(cursor: dict) -> datetime | None:
+        raw = cursor.get("last_seen_published_at_ts")
+        if not raw:
+            return None
+        try:
+            return datetime.fromisoformat(raw)
+        except ValueError:
+            return None
+
+    @staticmethod
+    def _at_or_before_cursor(
+        published_ts: datetime | None,
+        published: date | None,
+        cursor_dt: datetime | None,
+        cursor_date: date | None,
+    ) -> bool:
+        if cursor_dt and published_ts:
+            return published_ts <= cursor_dt
+        if cursor_date is None:
+            return True
+        return bool(published and published <= cursor_date)
 
 
 def default_since(settings):

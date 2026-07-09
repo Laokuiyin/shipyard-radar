@@ -127,6 +127,7 @@ class Pipeline:
 
     @staticmethod
     def _candidate_from_row(row) -> ArticleCandidate:
+        published_ts = datetime.fromisoformat(row["published_at_ts"]) if row["published_at_ts"] else None
         return ArticleCandidate(
             source_id=row["source_id"],
             yard_hint=row["yard_hint"],
@@ -136,6 +137,7 @@ class Pipeline:
             published_at=date.fromisoformat(row["published_at"])
             if row["published_at"]
             else None,
+            published_at_ts=published_ts,
             account_name=row["account_name"],
         )
 
@@ -143,7 +145,19 @@ class Pipeline:
     def _discovery_cursor(candidates: list[ArticleCandidate]) -> dict | None:
         if not candidates:
             return None
+        timed = [candidate for candidate in candidates if candidate.published_at_ts]
         dated = [candidate for candidate in candidates if candidate.published_at]
+        if timed:
+            latest = max(timed, key=lambda item: item.published_at_ts)
+            return {
+                "last_seen_published_at": latest.published_at.isoformat()
+                if latest.published_at
+                else None,
+                "last_seen_published_at_ts": latest.published_at_ts.isoformat()
+                if latest.published_at_ts
+                else None,
+                "last_seen_url": latest.url,
+            }
         if not dated:
             return {"last_seen_url": candidates[0].url}
         latest = max(dated, key=lambda item: item.published_at)

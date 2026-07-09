@@ -31,6 +31,7 @@
           <th>接口</th>
           <th>来源 ID</th>
           <th>公众号</th>
+          <th>参数</th>
           <th>调用数</th>
           <th>成功</th>
           <th>失败</th>
@@ -43,13 +44,14 @@
           <td>{{ row.endpoint }}</td>
           <td>{{ row.source_id or "" }}</td>
           <td>{{ row.account_name or "" }}</td>
+          <td>{{ row.request_meta or "" }}</td>
           <td>{{ row.calls }}</td>
           <td>{{ row.success_count or 0 }}</td>
           <td>{{ row.failed_count or 0 }}</td>
         </tr>
         {% endfor %}
         {% if not rows %}
-        <tr><td colspan="7">暂无接口调用记录</td></tr>
+        <tr><td colspan="8">暂无接口调用记录</td></tr>
         {% endif %}
       </tbody>
     </table>

@@ -11,6 +11,10 @@ from shipwatch.domain import Article, ArticleCandidate, Extraction
 from shipwatch.text import iso_date
 
 
+def iso_datetime(value: datetime | None) -> str | None:
+    return value.isoformat() if value else None
+
+
 SCHEMA = """
 PRAGMA journal_mode=WAL;
 PRAGMA foreign_keys=ON;
@@ -24,6 +28,7 @@ CREATE TABLE IF NOT EXISTS articles (
     title TEXT NOT NULL,
     url TEXT NOT NULL UNIQUE,
     published_at TEXT,
+    published_at_ts TEXT,
     fetched_at TEXT NOT NULL,
     content TEXT NOT NULL DEFAULT '',
     content_hash TEXT,
@@ -99,6 +104,7 @@ CREATE TABLE IF NOT EXISTS api_usage (
     source_id TEXT,
     account_name TEXT,
     article_url TEXT,
+    request_meta TEXT,
     success INTEGER NOT NULL,
     status_code INTEGER,
     error TEXT
@@ -145,6 +151,7 @@ class Database:
                 "discovered_at": "ALTER TABLE articles ADD COLUMN discovered_at TEXT",
                 "first_seen_at": "ALTER TABLE articles ADD COLUMN first_seen_at TEXT",
                 "last_seen_at": "ALTER TABLE articles ADD COLUMN last_seen_at TEXT",
+                "published_at_ts": "ALTER TABLE articles ADD COLUMN published_at_ts TEXT",
                 "body_fetch_attempts": (
                     "ALTER TABLE articles ADD COLUMN body_fetch_attempts INTEGER NOT NULL DEFAULT 0"
                 ),
@@ -153,6 +160,11 @@ class Database:
             for column, sql in migrations.items():
                 if column not in article_columns:
                     conn.execute(sql)
+            api_columns = {
+                row["name"] for row in conn.execute("PRAGMA table_info(api_usage)")
+            }
+            if "request_meta" not in api_columns:
+                conn.execute("ALTER TABLE api_usage ADD COLUMN request_meta TEXT")
             now = datetime.now().isoformat()
             conn.execute("UPDATE articles SET discovered_at=COALESCE(discovered_at, created_at, ?)", (now,))
             conn.execute("UPDATE articles SET first_seen_at=COALESCE(first_seen_at, created_at, ?)", (now,))
@@ -164,10 +176,10 @@ class Database:
     def latest_source_cursor(self, source_id: str, channel: str) -> dict:
         rows = self.query(
             """
-            SELECT published_at, url
+            SELECT published_at, published_at_ts, url
             FROM articles
             WHERE source_id=? AND channel=?
-            ORDER BY COALESCE(published_at, first_seen_at, fetched_at) DESC, id DESC
+            ORDER BY COALESCE(published_at_ts, published_at, first_seen_at, fetched_at) DESC, id DESC
             LIMIT 1
             """,
             (source_id, channel),
@@ -176,6 +188,7 @@ class Database:
             return {}
         return {
             "last_seen_published_at": rows[0]["published_at"],
+            "last_seen_published_at_ts": rows[0]["published_at_ts"],
             "last_seen_url": rows[0]["url"],
         }
 
@@ -186,12 +199,13 @@ class Database:
                 """
                 INSERT INTO articles (
                     source_id, yard_hint, channel, account_name, title, url,
-                    published_at, fetched_at, content, fetch_status,
+                    published_at, published_at_ts, fetched_at, content, fetch_status,
                     discovered_at, first_seen_at, last_seen_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, '', 'discovered', ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, '', 'discovered', ?, ?, ?)
                 ON CONFLICT(url) DO UPDATE SET
                     title=COALESCE(NULLIF(excluded.title, ''), articles.title),
                     published_at=COALESCE(excluded.published_at, articles.published_at),
+                    published_at_ts=COALESCE(excluded.published_at_ts, articles.published_at_ts),
                     account_name=COALESCE(excluded.account_name, articles.account_name),
                     last_seen_at=excluded.last_seen_at,
                     updated_at=CURRENT_TIMESTAMP
@@ -204,6 +218,7 @@ class Database:
                     candidate.title,
                     candidate.url,
                     iso_date(candidate.published_at),
+                    iso_datetime(candidate.published_at_ts),
                     now,
                     now,
                     now,
@@ -219,12 +234,13 @@ class Database:
                 """
                 INSERT INTO articles (
                     source_id, yard_hint, channel, account_name, title, url,
-                    published_at, fetched_at, content, content_hash, fetch_status,
+                    published_at, published_at_ts, fetched_at, content, content_hash, fetch_status,
                     fetch_error, body_fetch_attempts, next_retry_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)
                 ON CONFLICT(url) DO UPDATE SET
                     title=excluded.title,
                     published_at=COALESCE(excluded.published_at, articles.published_at),
+                    published_at_ts=COALESCE(excluded.published_at_ts, articles.published_at_ts),
                     fetched_at=excluded.fetched_at,
                     content=CASE WHEN excluded.content != '' THEN excluded.content ELSE articles.content END,
                     content_hash=COALESCE(excluded.content_hash, articles.content_hash),
@@ -242,6 +258,7 @@ class Database:
                     article.title,
                     article.url,
                     iso_date(article.published_at),
+                    iso_datetime(article.published_at_ts),
                     article.fetched_at.isoformat(),
                     article.content,
                     article.content_hash,
@@ -282,7 +299,7 @@ class Database:
               {source_filter}
             ORDER BY
               CASE fetch_status WHEN 'discovered' THEN 0 ELSE 1 END,
-              COALESCE(published_at, first_seen_at, fetched_at)
+              COALESCE(published_at_ts, published_at, first_seen_at, fetched_at)
         """.format(source_filter=source_filter)
         if limit:
             sql += " LIMIT ?"
@@ -297,7 +314,7 @@ class Database:
                     f"""
                     SELECT * FROM articles
                     WHERE extraction_status IN ('pending', 'error') AND {condition}
-                    ORDER BY COALESCE(published_at, fetched_at)
+                    ORDER BY COALESCE(published_at_ts, published_at, fetched_at)
                     """
                 )
             )
@@ -388,17 +405,22 @@ class Database:
         source_id: str | None = None,
         account_name: str | None = None,
         article_url: str | None = None,
+        request_meta: str | dict | None = None,
         success: bool = False,
         status_code: int | None = None,
         error: str | None = None,
     ) -> None:
+        if isinstance(request_meta, dict):
+            meta_value = json.dumps(request_meta, ensure_ascii=False)
+        else:
+            meta_value = request_meta
         with self.connect() as conn:
             conn.execute(
                 """
                 INSERT INTO api_usage(
                   called_at, provider, endpoint, source_id, account_name,
-                  article_url, success, status_code, error
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                  article_url, request_meta, success, status_code, error
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     datetime.now().isoformat(),
@@ -407,6 +429,7 @@ class Database:
                     source_id,
                     account_name,
                     article_url,
+                    meta_value,
                     int(success),
                     status_code,
                     error[:1000] if error else None,
@@ -417,13 +440,14 @@ class Database:
         return self.query(
             """
             SELECT substr(called_at, 1, 10) AS day, endpoint, source_id, account_name,
+                   request_meta,
                    COUNT(*) AS calls,
                    SUM(CASE WHEN success THEN 1 ELSE 0 END) AS success_count,
                    SUM(CASE WHEN NOT success THEN 1 ELSE 0 END) AS failed_count
             FROM api_usage
             WHERE called_at >= datetime('now', ?)
-            GROUP BY day, endpoint, source_id, account_name
-            ORDER BY day DESC, endpoint, source_id, account_name
+            GROUP BY day, endpoint, source_id, account_name, request_meta
+            ORDER BY day DESC, endpoint, source_id, account_name, request_meta
             """,
             (f"-{days} days",),
         )

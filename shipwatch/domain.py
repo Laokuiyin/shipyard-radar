@@ -13,6 +13,7 @@ class ArticleCandidate:
     title: str
     url: str
     published_at: date | None = None
+    published_at_ts: datetime | None = None
     account_name: str | None = None
 
 
@@ -26,6 +27,7 @@ class Article:
     content: str
     published_at: date | None
     fetched_at: datetime
+    published_at_ts: datetime | None = None
     account_name: str | None = None
     fetch_status: str = "ok"
     fetch_error: str | None = None
@@ -56,4 +58,3 @@ class Extraction:
     confidence: float = 0.0
     review_reason: str | None = None
     raw: dict[str, Any] = field(default_factory=dict)
-

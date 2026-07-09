@@ -38,7 +38,7 @@ class AppConfig:
     request_delay_seconds: float = 1.0
     max_list_pages_per_source: int = 8
     max_articles_per_run: int = 300
-    discovery_stop_existing_count: int = 20
+    discovery_stop_existing_count: int = 5
     user_agent: str = "Shipwatch/0.1"
     relevance_keywords: list[str] = field(default_factory=list)
     excluded_keywords: list[str] = field(default_factory=list)

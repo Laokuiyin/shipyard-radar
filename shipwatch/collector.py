@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import re
 import logging
-from datetime import datetime
+from datetime import date, datetime
 from urllib.parse import urlsplit
 
 from shipwatch.config import Settings
@@ -35,6 +35,7 @@ class Collector:
             api_used = False
             title = content = ""
             published = candidate.published_at
+            published_ts = candidate.published_at_ts
             account = candidate.account_name
 
             # 如果配置了打价啦 API 且是公众号文章，优先使用 API
@@ -42,7 +43,7 @@ class Collector:
                 # 检查数据库是否已有正文，避免重复花钱调用 API
                 existing = self.db.query(
                     """
-                    SELECT id, title, content, published_at, account_name
+                    SELECT id, title, content, published_at, published_at_ts, account_name
                     FROM articles
                     WHERE url=? AND fetch_status='ok' AND length(content) >= 80
                     """,
@@ -52,14 +53,19 @@ class Collector:
                     row = existing[0]
                     title = row["title"] or candidate.title
                     content = row["content"] or ""
-                    published = row["published_at"] or candidate.published_at
+                    published = date.fromisoformat(row["published_at"]) if row["published_at"] else candidate.published_at
+                    published_ts = (
+                        datetime.fromisoformat(row["published_at_ts"])
+                        if row["published_at_ts"]
+                        else candidate.published_at_ts
+                    )
                     account = row["account_name"] or candidate.account_name
                     final_url = candidate.url
                     if content:
                         api_used = True
                 if not api_used:
                     try:
-                        title, content, published, account, final_url = self._fetch_via_dajiala(
+                        title, content, published, published_ts, account, final_url = self._fetch_via_dajiala(
                             candidate.url,
                             source_id=candidate.source_id,
                             account_name=candidate.account_name,
@@ -91,6 +97,7 @@ class Collector:
                     if "mp.weixin.qq.com" not in (urlsplit(final_url).hostname or ""):
                         raise ValueError(f"搜狗链接未跳转到微信原文: {final_url}")
                     title, content, published, account = extract_wechat_article(response.text)
+                    published_ts = published_ts or candidate.published_at_ts
                     source_config = self.settings.source_by_id(candidate.source_id)
                     allowed = source_config.wechat.account_names if source_config.wechat else []
                     if account and not any(name in account or account in name for name in allowed):
@@ -116,6 +123,7 @@ class Collector:
                 url=final_url,
                 content=content,
                 published_at=published or candidate.published_at,
+                published_at_ts=published_ts or candidate.published_at_ts,
                 fetched_at=now,
                 account_name=account or candidate.account_name,
                 fetch_status=status,
@@ -133,6 +141,7 @@ class Collector:
                 url=normalize_url(candidate.url),
                 content="",
                 published_at=candidate.published_at,
+                published_at_ts=candidate.published_at_ts,
                 fetched_at=now,
                 account_name=candidate.account_name,
                 fetch_status="blocked" if self.is_restricted_error(error) else "error",
@@ -147,8 +156,8 @@ class Collector:
         article_url: str,
         source_id: str | None = None,
         account_name: str | None = None,
-    ) -> tuple[str, str, datetime.date | None, str | None, str]:
-        """通过打价啦 API 获取文章正文 HTML，返回 (title, content, published, account, final_url)"""
+    ) -> tuple[str, str, date | None, datetime | None, str | None, str]:
+        """通过打价啦 API 获取文章正文 HTML，返回 (title, content, published, published_ts, account, final_url)"""
         import httpx
         from urllib.parse import urlparse, parse_qs, unquote
         # 如果链接是验证码跳转，从中提取原始文章链接
@@ -211,10 +220,11 @@ class Collector:
         nickname = article_data.get("nickname") or None
         post_time = article_data.get("post_time")
         published = None
+        published_ts = None
         if post_time:
-            from datetime import datetime
-            published = datetime.fromtimestamp(post_time).date()
-        return title, html_content.strip(), published, nickname, article_url
+            published_ts = datetime.fromtimestamp(post_time)
+            published = published_ts.date()
+        return title, html_content.strip(), published, published_ts, nickname, article_url
     @staticmethod
     def _sogou_target(html: str) -> str | None:
         import re

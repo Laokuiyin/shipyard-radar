@@ -5,7 +5,7 @@ app:
   request_delay_seconds: 1.0
   max_list_pages_per_source: 8
   max_articles_per_run: 300
-  discovery_stop_existing_count: 20
+  discovery_stop_existing_count: 5
   user_agent: Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko)
     Chrome/124.0 Safari/537.36 Shipwatch/0.1
   relevance_keywords:
