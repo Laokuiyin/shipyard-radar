@@ -45,6 +45,8 @@ def test_dashboard_and_health(tmp_path):
     assert dashboard.status_code == 200
     assert "测试船东" in dashboard.text
     assert "新船项目主表" in dashboard.text
+    assert 'class="mobile-list"' in dashboard.text
+    assert 'class="mobile-card"' in dashboard.text
     assert client.get("/health").json()["projects"] == 1
     assert client.get("/source-status").status_code == 200
     assert client.get("/source-config").status_code == 200
@@ -77,6 +79,8 @@ def test_sources_open_link_uses_wechat_target_url(tmp_path):
     response = TestClient(create_app(settings)).get("/sources?status=partial")
 
     assert response.status_code == 200
+    assert 'class="mobile-list"' in response.text
+    assert 'class="mobile-card"' in response.text
     assert "https://mp.weixin.qq.com/s/gZULykpwdtdBLiorj5u-uQ" in response.text
     assert "wappoc_appmsgcaptcha" not in response.text
 

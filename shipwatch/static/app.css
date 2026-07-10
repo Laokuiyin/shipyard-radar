@@ -53,6 +53,15 @@ td small { display: block; color: var(--muted); }
 .source-link { display: inline-block; max-width: 260px; overflow: hidden; text-overflow: ellipsis; }
 .evidence { max-width: 360px; min-width: 240px; color: #3f515f; }
 .empty { padding: 44px; color: var(--muted); text-align: center; }
+.mobile-list { display: none; }
+.mobile-card { padding: 14px 16px; border-top: 1px solid var(--line); background: white; }
+.mobile-card:nth-child(even) { background: #f8fafb; }
+.mobile-card-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.mobile-card-head strong { display: block; font-size: 15px; line-height: 1.35; overflow-wrap: anywhere; }
+.mobile-card-head span:not(.badge) { display: block; margin-top: 3px; color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
+.mobile-card dl { display: grid; grid-template-columns: 58px minmax(0, 1fr); gap: 8px 10px; margin: 12px 0 0; }
+.mobile-card dt { color: var(--muted); font-size: 12px; font-weight: 800; }
+.mobile-card dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
 .article-body { padding: 18px 22px 22px; font-size: 15px; line-height: 1.75; color: #1a1a1a; overflow-wrap: break-word; }
 .article-body p { margin: 0 0 14px; }
 .article-body img { display: none; }
@@ -97,4 +106,12 @@ footer { padding: 24px; color: var(--muted); text-align: center; font-size: 12px
   .metrics, .status-grid, .filters { grid-template-columns: 1fr; }
   main { width: 96vw; margin-top: 12px; }
   .topbar { padding: 20px 4vw; }
+  .panel-head { align-items: flex-start; flex-direction: column; gap: 6px; padding: 16px; }
+  .filters { padding: 12px 16px 16px; }
+  button, .button { width: 100%; text-align: center; }
+}
+@media (max-width: 700px) {
+  .table-wrap { display: none; }
+  .mobile-list { display: block; border-top: 1px solid var(--line); }
+  .source-link { max-width: 100%; }
 }
