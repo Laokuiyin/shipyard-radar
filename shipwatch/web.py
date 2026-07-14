@@ -13,7 +13,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-from shipwatch.config import Settings, load_settings, single_wechat_account
+from shipwatch.config import Settings, SourceConfig, load_settings, single_wechat_account
 from shipwatch.db import Database
 from shipwatch.pipeline import Pipeline
 from shipwatch.text import normalize_url
@@ -84,10 +84,13 @@ def _progress_options(db: Database, yard: str = "", review_status: str = "", q: 
         f"""
         SELECT DISTINCT COALESCE(p.current_progress, '') AS progress
         FROM projects p
-        LEFT JOIN project_sources ps ON ps.project_id=p.id
-        LEFT JOIN articles a ON a.id=ps.article_id
+        JOIN project_sources ps ON ps.project_id=p.id
+        JOIN articles a ON a.id=ps.article_id AND a.channel='微信公众号'
         WHERE ps.article_id=(
-          SELECT MAX(ps2.article_id) FROM project_sources ps2 WHERE ps2.project_id=p.id
+          SELECT MAX(ps2.article_id)
+          FROM project_sources ps2
+          JOIN articles a2 ON a2.id=ps2.article_id
+          WHERE ps2.project_id=p.id AND a2.channel='微信公众号'
         ) AND {" AND ".join(conditions)}
         ORDER BY
           CASE p.current_progress
@@ -101,6 +104,49 @@ def _progress_options(db: Database, yard: str = "", review_status: str = "", q: 
         tuple(params),
     )
     return [row["progress"] for row in rows]
+
+
+def _active_source_channels(settings: Settings) -> list[tuple[str, SourceConfig, str, str]]:
+    rows = []
+    for source in settings.sources:
+        if source.wechat:
+            rows.append((f"{source.id}:wechat", source, "wechat", "微信公众号"))
+    return rows
+
+
+def _source_error_count(db: Database, settings: Settings) -> int:
+    source_keys = [source_key for source_key, *_ in _active_source_channels(settings)]
+    if not source_keys:
+        return 0
+    placeholders = ",".join("?" for _ in source_keys)
+    return db.scalar(
+        f"""
+        SELECT COUNT(*) FROM crawl_state
+        WHERE last_error IS NOT NULL AND source_key IN ({placeholders})
+        """,
+        tuple(source_keys),
+    ) or 0
+
+
+def _project_count(db: Database, review_status: str | None = None) -> int:
+    params: tuple[object, ...] = ()
+    status_filter = ""
+    if review_status:
+        status_filter = " AND p.review_status=?"
+        params = (review_status,)
+    return db.scalar(
+        f"""
+        SELECT COUNT(*) FROM projects p
+        WHERE EXISTS (
+          SELECT 1
+          FROM project_sources ps
+          JOIN articles a ON a.id=ps.article_id
+          WHERE ps.project_id=p.id AND a.channel='微信公众号'
+        ){status_filter}
+        """,
+        params,
+    ) or 0
+
 
 def create_app(settings: Settings | None = None) -> FastAPI:
     settings = settings or load_settings()
@@ -140,20 +186,34 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     ):
         projects = db.project_rows(yard or None, progress or None, review_status or None, q or None)
         metrics = {
-            "projects": db.scalar("SELECT COUNT(*) FROM projects") or 0,
-            "confirmed": db.scalar("SELECT COUNT(*) FROM projects WHERE review_status='已确认'") or 0,
-            "reviews": db.scalar("SELECT COUNT(*) FROM projects WHERE review_status='待复核'") or 0,
-            "irrelevant": db.scalar("SELECT COUNT(*) FROM projects WHERE review_status='无关'") or 0,
-            "source_errors": db.scalar(
-                "SELECT COUNT(*) FROM crawl_state WHERE last_error IS NOT NULL"
-            ) or 0,
+            "projects": _project_count(db),
+            "confirmed": _project_count(db, "已确认"),
+            "reviews": _project_count(db, "待复核"),
+            "duplicates": _project_count(db, "可能重复"),
+            "irrelevant": _project_count(db, "无关"),
+            "source_errors": _source_error_count(db, settings),
         }
         context = base_context(request, "projects")
         context.update(
             {
                 "projects": projects,
                 "metrics": metrics,
-                "yards": [row[0] for row in db.query("SELECT DISTINCT yard FROM projects ORDER BY yard")],
+                "yards": [
+                    row[0]
+                    for row in db.query(
+                        """
+                        SELECT DISTINCT p.yard
+                        FROM projects p
+                        WHERE EXISTS (
+                          SELECT 1
+                          FROM project_sources ps
+                          JOIN articles a ON a.id=ps.article_id
+                          WHERE ps.project_id=p.id AND a.channel='微信公众号'
+                        )
+                        ORDER BY p.yard
+                        """
+                    )
+                ],
                 "progresses": _progress_options(db, yard, review_status, q),
                 "filters": {
                     "yard": yard,
@@ -225,34 +285,32 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     def source_status(request: Request):
         states = {row["source_key"]: row for row in db.query("SELECT * FROM crawl_state")}
         rows = []
-        for source in settings.sources:
-            channels = [("wechat", "微信公众号")] if source.wechat else []
-            for channel_key, channel_name in channels:
-                state = states.get(f"{source.id}:{channel_key}")
-                if state:
-                    rows.append(
-                        {
-                            "yard": source.yard,
-                            "channel": channel_name,
-                            "status": _status_label(state["last_error"], state["result_count"]),
-                            "last_attempt_at": state["last_attempt_at"],
-                            "last_success_at": state["last_success_at"],
-                            "result_count": state["result_count"],
-                            "error": _failure_reason(state["last_error"]),
-                        }
-                    )
-                else:
-                    rows.append(
-                        {
-                            "yard": source.yard,
-                            "channel": channel_name,
-                            "status": "未执行",
-                            "last_attempt_at": None,
-                            "last_success_at": None,
-                            "result_count": None,
-                            "error": "尚无采集记录",
-                        }
-                    )
+        for source_key, source, _channel_key, channel_name in _active_source_channels(settings):
+            state = states.get(source_key)
+            if state:
+                rows.append(
+                    {
+                        "yard": source.yard,
+                        "channel": channel_name,
+                        "status": _status_label(state["last_error"], state["result_count"]),
+                        "last_attempt_at": state["last_attempt_at"],
+                        "last_success_at": state["last_success_at"],
+                        "result_count": state["result_count"],
+                        "error": _failure_reason(state["last_error"]),
+                    }
+                )
+            else:
+                rows.append(
+                    {
+                        "yard": source.yard,
+                        "channel": channel_name,
+                        "status": "未执行",
+                        "last_attempt_at": None,
+                        "last_success_at": None,
+                        "result_count": None,
+                        "error": "尚无采集记录",
+                    }
+                )
         context = base_context(request, "source_status")
         context["rows"] = rows
         return templates.TemplateResponse(request, "source_status.html", context)

@@ -93,7 +93,7 @@ class ExcelExporter:
                         row["source_url"], row["review_status"],
                     ]
                 )
-            if row["review_status"] == "待复核":
+            if row["review_status"] in {"待复核", "可能重复"}:
                 sheets["待人工复核"].append(
                     [
                         row["yard"], row["owner_project"], row["ship_type"], row["ship_count"],

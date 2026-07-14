@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block page_title %}{{ title }}{% endblock %}</title>
-  <link rel="stylesheet" href="{{ url_for('static', path='/app.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', path='/app.css') }}?v=20260711-metrics">
 </head>
 <body>
   <header class="topbar">
@@ -18,7 +18,6 @@
       <a class="{{ 'active' if active == 'sources' else '' }}" href="/sources">来源明细</a>
      <a class="{{ 'active' if active == 'source_status' else '' }}" href="/source-status">采集状态</a>
       <a class="{{ 'active' if active == 'api_usage' else '' }}" href="/api-usage">接口用量</a>
-      <a class="{{ 'active' if active == 'source_config' else '' }}" href="/source-config">来源配置</a>
    </nav>
   </header>
   <main>{% block content %}{% endblock %}</main>

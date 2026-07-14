@@ -514,10 +514,13 @@ class Database:
               (SELECT GROUP_CONCAT(label || COALESCE('：' || event_date, ''), '；')
                FROM milestones m WHERE m.project_id=p.id) AS milestones_text
             FROM projects p
-            LEFT JOIN project_sources ps ON ps.project_id=p.id
-            LEFT JOIN articles a ON a.id=ps.article_id
+            JOIN project_sources ps ON ps.project_id=p.id
+            JOIN articles a ON a.id=ps.article_id AND a.channel='微信公众号'
             WHERE ps.article_id=(
-              SELECT MAX(ps2.article_id) FROM project_sources ps2 WHERE ps2.project_id=p.id
+              SELECT MAX(ps2.article_id)
+              FROM project_sources ps2
+              JOIN articles a2 ON a2.id=ps2.article_id
+              WHERE ps2.project_id=p.id AND a2.channel='微信公众号'
             ) AND {" AND ".join(conditions)}
             ORDER BY
               CASE p.current_progress

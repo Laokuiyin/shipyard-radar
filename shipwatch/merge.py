@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime
+from datetime import date, datetime
 
 from shipwatch.db import Database
 from shipwatch.domain import Extraction
@@ -17,7 +17,8 @@ PROGRESS_RANK = {
     "交付/完工": 60,
 }
 
-REVIEW_STATUSES = {"已确认", "待复核", "无关"}
+REVIEW_STATUSES = {"已确认", "待复核", "可能重复", "无关"}
+NEAR_DUPLICATE_DAYS = 14
 
 
 def review_status_for(extraction: Extraction) -> str:
@@ -39,9 +40,76 @@ def project_key(extraction: Extraction, article_id: int) -> str:
     return stable
 
 
+def _parse_date(value: str | None) -> date | None:
+    if not value:
+        return None
+    try:
+        return date.fromisoformat(value[:10])
+    except ValueError:
+        return None
+
+
+def _compatible_name(left: str | None, right: str | None) -> bool:
+    left_key = compact_name(left)
+    right_key = compact_name(right)
+    if not left_key or not right_key:
+        return False
+    return left_key == right_key or left_key in right_key or right_key in left_key
+
+
+def _compatible_ship_type(left: str | None, right: str | None) -> bool:
+    left_key = compact_name(left)
+    right_key = compact_name(right)
+    if not left_key or not right_key:
+        return False
+    return left_key == right_key or left_key in right_key or right_key in left_key
+
+
+def _series_can_match(left: str | None, right: str | None) -> bool:
+    left_key = compact_name(left)
+    right_key = compact_name(right)
+    return not left_key or not right_key or left_key == right_key
+
+
+def _dates_near(left: date | None, right: date | None) -> bool:
+    if not left or not right:
+        return True
+    return abs((left - right).days) <= NEAR_DUPLICATE_DAYS
+
+
 class ProjectMerger:
     def __init__(self, db: Database):
         self.db = db
+
+    def _near_duplicate_candidates(self, conn, extraction: Extraction, article_date: date | None):
+        rows = conn.execute(
+            """
+            SELECT p.*, MAX(a.published_at) AS latest_published_at
+            FROM projects p
+            LEFT JOIN project_sources ps ON ps.project_id=p.id
+            LEFT JOIN articles a ON a.id=ps.article_id
+            WHERE p.yard=? AND EXISTS (
+              SELECT 1
+              FROM project_sources wps
+              JOIN articles wa ON wa.id=wps.article_id
+              WHERE wps.project_id=p.id AND wa.channel='微信公众号'
+            )
+            GROUP BY p.id
+            """,
+            (extraction.yard,),
+        ).fetchall()
+        candidates = []
+        for row in rows:
+            if not _compatible_name(extraction.owner_project, row["owner_project"]):
+                continue
+            if not _compatible_ship_type(extraction.ship_type, row["ship_type"]):
+                continue
+            if not _series_can_match(extraction.series_identifier, row["series_identifier"]):
+                continue
+            if not _dates_near(article_date, _parse_date(row["latest_published_at"])):
+                continue
+            candidates.append(row)
+        return candidates
 
     def merge(self, article_id: int, extraction: Extraction) -> int | None:
         if not extraction.relevant or not extraction.yard:
@@ -50,7 +118,25 @@ class ProjectMerger:
         now = datetime.now().isoformat()
         with self.db.connect() as conn:
             existing = conn.execute("SELECT * FROM projects WHERE project_key=?", (key,)).fetchone()
+            article_row = conn.execute("SELECT published_at FROM articles WHERE id=?", (article_id,)).fetchone()
+            article_date = _parse_date(article_row["published_at"] if article_row else None)
             review_status = review_status_for(extraction)
+            if not existing:
+                near_duplicates = self._near_duplicate_candidates(conn, extraction, article_date)
+                if len(near_duplicates) == 1:
+                    existing = near_duplicates[0]
+                    key = existing["project_key"]
+                elif len(near_duplicates) > 1:
+                    review_status = "可能重复"
+                    duplicate_ids = "、".join(str(row["id"]) for row in near_duplicates)
+                    extraction.review_reason = "；".join(
+                        item
+                        for item in (
+                            extraction.review_reason,
+                            f"可能重复：候选项目ID {duplicate_ids}",
+                        )
+                        if item
+                    )
             if existing:
                 conflicts = []
                 incoming_ship_count = extraction.ship_count
@@ -110,9 +196,10 @@ class ProjectMerger:
                       completion_date=COALESCE(?, completion_date),
                       confidence=MAX(confidence, ?),
                       review_status=CASE
+                        WHEN ?='可能重复' THEN '可能重复'
                         WHEN ?='待复核' THEN '待复核'
                         WHEN ?='无关' THEN '无关'
-                        WHEN review_status!='待复核' THEN ?
+                        WHEN review_status NOT IN ('待复核', '可能重复') THEN ?
                         ELSE review_status
                       END,
                       review_reason=COALESCE(?, review_reason),
@@ -129,6 +216,7 @@ class ProjectMerger:
                         iso_date(extraction.start_date),
                         iso_date(extraction.completion_date),
                         extraction.confidence,
+                        review_status,
                         review_status,
                         review_status,
                         review_status,

@@ -9,7 +9,7 @@ from shipwatch.db import Database
 from shipwatch.extract import LLMExtractor
 
 
-REVIEW_STATUSES = {"已确认", "待复核", "无关"}
+REVIEW_STATUSES = {"已确认", "待复核", "可能重复", "无关"}
 
 
 def status_from_extraction(extraction) -> str:

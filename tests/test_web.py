@@ -18,7 +18,7 @@ def test_dashboard_and_health(tmp_path):
         Article(
             source_id="waigaoqiao",
             yard_hint="上海外高桥造船",
-            channel="官网",
+            channel="微信公众号",
             title="新船开工",
             url="https://example.com/project",
             content="外高桥造船一艘集装箱船开工",
@@ -47,9 +47,62 @@ def test_dashboard_and_health(tmp_path):
     assert "新船项目主表" in dashboard.text
     assert 'class="mobile-list"' in dashboard.text
     assert 'class="mobile-card"' in dashboard.text
+    assert 'href="/source-config"' not in dashboard.text
     assert client.get("/health").json()["projects"] == 1
     assert client.get("/source-status").status_code == 200
     assert client.get("/source-config").status_code == 200
+
+
+def test_dashboard_source_errors_only_count_active_sources(tmp_path):
+    settings = load_settings("config.yaml")
+    settings.db_path = tmp_path / "web.db"
+    db = Database(settings.db_path)
+    db.init()
+    db.set_crawl_state("jiangnan:website", "legacy website error", result_count=0)
+    db.set_crawl_state("unknown:wechat", "removed source error", result_count=0)
+    db.set_crawl_state("jiangnan:wechat", "current wechat error", result_count=0)
+
+    response = TestClient(create_app(settings)).get("/")
+
+    assert response.status_code == 200
+    assert "<span>来源异常</span><strong>1</strong>" in response.text
+
+
+def test_dashboard_hides_website_only_projects(tmp_path):
+    settings = load_settings("config.yaml")
+    settings.db_path = tmp_path / "web.db"
+    db = Database(settings.db_path)
+    db.init()
+    article_id = db.upsert_article(
+        Article(
+            source_id="waigaoqiao",
+            yard_hint="上海外高桥造船",
+            channel="官网",
+            title="历史官网项目",
+            url="https://example.com/website-only",
+            content="历史官网项目开工",
+            published_at=date(2026, 6, 1),
+            fetched_at=datetime.now(),
+            content_hash="website",
+        )
+    )
+    ProjectMerger(db).merge(
+        article_id,
+        Extraction(
+            relevant=True,
+            yard="上海外高桥造船",
+            owner_project="历史官网船东",
+            ship_type="集装箱船",
+            current_progress="开工",
+            confidence=0.95,
+        ),
+    )
+
+    response = TestClient(create_app(settings)).get("/")
+
+    assert response.status_code == 200
+    assert "历史官网船东" not in response.text
+    assert "<span>项目候选</span><strong>0</strong>" in response.text
 
 
 def test_sources_open_link_uses_wechat_target_url(tmp_path):
@@ -142,7 +195,7 @@ def test_dashboard_defaults_to_confirmed_and_scopes_progress_options(tmp_path):
         Article(
             source_id="yard",
             yard_hint="测试船厂",
-            channel="官网",
+            channel="微信公众号",
             title="确认项目",
             url="https://example.com/confirmed",
             content="确认项目开工",
@@ -155,7 +208,7 @@ def test_dashboard_defaults_to_confirmed_and_scopes_progress_options(tmp_path):
         Article(
             source_id="yard",
             yard_hint="测试船厂",
-            channel="官网",
+            channel="微信公众号",
             title="待复核项目",
             url="https://example.com/pending",
             content="待复核项目命名",
@@ -196,8 +249,10 @@ def test_dashboard_defaults_to_confirmed_and_scopes_progress_options(tmp_path):
     assert "待复核船东" not in page.text
     assert "<span>已确认</span>" in page.text
     assert "<span>待复核</span>" in page.text
+    assert "<span>可能重复</span>" in page.text
     assert "<span>无关</span>" in page.text
     assert 'option value="已确认" selected' in page.text
+    assert 'option value="可能重复"' in page.text
     assert 'option value="无关"' in page.text
     assert 'option value="开工"' in page.text
     assert 'option value="命名"' not in page.text

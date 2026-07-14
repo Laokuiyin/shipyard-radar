@@ -1,0 +1,1 @@
+17 3 * * * root /opt/dify-1.14.2/docker/certbot/renew-shipwatch-cert.sh >> /var/log/shipwatch-cert-renew.log 2>&1
