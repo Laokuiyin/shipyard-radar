@@ -29,6 +29,8 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser("extract", help="抽取待处理文章并合并项目")
     reprocess_starts = sub.add_parser("reprocess-starts", help="用纯文本重跑历史开工公众号文章")
     reprocess_starts.add_argument("--limit", type=int, help="最多重跑篇数")
+    reclassify = sub.add_parser("reclassify-projects", help="重分析全部项目并更新四类复核状态")
+    reclassify.add_argument("--limit", type=int, help="最多复核项目数")
     export = sub.add_parser("export", help="生成 Excel")
     export.add_argument("--output", type=Path)
     sub.add_parser("daily", help="执行每日采集、抽取与导出")
@@ -66,6 +68,8 @@ def main() -> None:
         print(pipeline.extract_pending())
     elif args.command == "reprocess-starts":
         print(pipeline.reprocess_start_projects(args.limit))
+    elif args.command == "reclassify-projects":
+        print(pipeline.reclassify_projects(args.limit))
     elif args.command == "export":
         print(pipeline.export(args.output))
     elif args.command == "daily":

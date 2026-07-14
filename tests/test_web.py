@@ -45,8 +45,8 @@ def test_dashboard_and_health(tmp_path):
     assert dashboard.status_code == 200
     assert "测试船东" in dashboard.text
     assert "新船项目主表" in dashboard.text
-    assert "历史项目总数" in dashboard.text
-    assert "新开工候选" in dashboard.text
+    assert "项目总数" in dashboard.text
+    assert "已确认" in dashboard.text
     assert 'class="mobile-list"' in dashboard.text
     assert 'class="mobile-card"' in dashboard.text
     assert 'href="/source-config"' not in dashboard.text
@@ -55,7 +55,7 @@ def test_dashboard_and_health(tmp_path):
     assert client.get("/source-config").status_code == 200
 
 
-def test_dashboard_source_errors_only_count_active_sources(tmp_path):
+def test_dashboard_source_errors_do_not_change_project_metrics(tmp_path):
     settings = load_settings("config.yaml")
     settings.db_path = tmp_path / "web.db"
     db = Database(settings.db_path)
@@ -67,7 +67,8 @@ def test_dashboard_source_errors_only_count_active_sources(tmp_path):
     response = TestClient(create_app(settings)).get("/")
 
     assert response.status_code == 200
-    assert "<span>来源异常</span><strong>1</strong>" in response.text
+    assert "项目总数" in response.text
+    assert "来源异常" not in response.text
 
 
 def test_dashboard_hides_website_only_projects(tmp_path):
@@ -104,7 +105,7 @@ def test_dashboard_hides_website_only_projects(tmp_path):
 
     assert response.status_code == 200
     assert "历史官网船东" not in response.text
-    assert "<span>历史项目总数</span><strong>1</strong>" in response.text
+    assert "<span>项目总数</span><strong>1</strong>" in response.text
 
 
 def test_sources_open_link_uses_wechat_target_url(tmp_path):
@@ -249,10 +250,10 @@ def test_dashboard_defaults_to_start_candidates_and_scopes_progress_options(tmp_
     assert "当前显示 1 条" in page.text
     assert "确认船东" in page.text
     assert "待复核船东" not in page.text
-    assert "历史已确认" in page.text
-    assert "历史待复核" in page.text
-    assert "历史可能重复" in page.text
-    assert "历史无关" in page.text
+    assert "<span>已确认</span>" in page.text
+    assert "<span>待复核</span>" in page.text
+    assert "<span>可能重复</span>" in page.text
+    assert "<span>无关</span>" in page.text
     assert 'option value="已确认" selected' not in page.text
     assert 'option value="可能重复"' in page.text
     assert 'option value="无关"' in page.text

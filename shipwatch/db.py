@@ -353,6 +353,55 @@ class Database:
                 (reason, article_id),
             )
 
+    def project_review_rows(self, limit: int | None = None) -> list[sqlite3.Row]:
+        """One preferred source article per project, favouring WeChat originals."""
+        sql = """
+            SELECT p.*, a.id AS article_id, a.source_id, a.yard_hint, a.channel,
+                   a.account_name, a.title, a.url, a.content, a.published_at,
+                   a.published_at_ts, a.fetch_status
+            FROM projects p
+            JOIN articles a ON a.id=(
+                SELECT a2.id
+                FROM project_sources ps2
+                JOIN articles a2 ON a2.id=ps2.article_id
+                WHERE ps2.project_id=p.id
+                ORDER BY CASE a2.channel WHEN '微信公众号' THEN 0 ELSE 1 END,
+                         COALESCE(a2.published_at_ts, a2.published_at, a2.fetched_at) DESC,
+                         a2.id DESC
+                LIMIT 1
+            )
+            ORDER BY p.id
+        """
+        if limit:
+            sql += " LIMIT ?"
+            return self.query(sql, (limit,))
+        return self.query(sql)
+
+    def update_project_review(
+        self, project_id: int, status: str, confidence: float, reason: str | None
+    ) -> None:
+        with self.connect() as conn:
+            conn.execute(
+                """
+                UPDATE projects
+                SET review_status=?, confidence=?, review_reason=?, last_changed_at=CURRENT_TIMESTAMP
+                WHERE id=?
+                """,
+                (status, confidence, reason, project_id),
+            )
+
+    def duplicate_review_rows(self) -> list[sqlite3.Row]:
+        return self.query(
+            """
+            SELECT p.*, MAX(a.published_at) AS latest_published_at
+            FROM projects p
+            LEFT JOIN project_sources ps ON ps.project_id=p.id
+            LEFT JOIN articles a ON a.id=ps.article_id
+            GROUP BY p.id
+            ORDER BY p.first_seen_at, p.id
+            """
+        )
+
     def mark_extracted(self, article_id: int, extraction: Extraction) -> None:
         payload = {
             "relevant": extraction.relevant,

@@ -198,14 +198,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         projects = db.project_rows(yard or None, progress or None, review_status or None, q or None)
         metrics = {
             "projects": _project_count(db),
-            "start_candidates": _project_count(
-                db, start_only=True, wechat_only=True, exclude_irrelevant=True
-            ),
             "confirmed": _project_count(db, "已确认"),
             "reviews": _project_count(db, "待复核"),
             "duplicates": _project_count(db, "可能重复"),
             "irrelevant": _project_count(db, "无关"),
-            "source_errors": _source_error_count(db, settings),
         }
         context = base_context(request, "projects")
         context.update(

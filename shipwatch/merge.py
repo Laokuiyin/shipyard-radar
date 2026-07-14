@@ -77,6 +77,20 @@ def _dates_near(left: date | None, right: date | None) -> bool:
     return abs((left - right).days) <= NEAR_DUPLICATE_DAYS
 
 
+def records_are_near_duplicates(left, right) -> bool:
+    """Apply the established project de-duplication rule to two project records."""
+    return (
+        left["yard"] == right["yard"]
+        and _compatible_name(left["owner_project"], right["owner_project"])
+        and _compatible_ship_type(left["ship_type"], right["ship_type"])
+        and _series_can_match(left["series_identifier"], right["series_identifier"])
+        and _dates_near(
+            _parse_date(left["latest_published_at"]),
+            _parse_date(right["latest_published_at"]),
+        )
+    )
+
+
 class ProjectMerger:
     def __init__(self, db: Database):
         self.db = db
@@ -100,15 +114,15 @@ class ProjectMerger:
         ).fetchall()
         candidates = []
         for row in rows:
-            if not _compatible_name(extraction.owner_project, row["owner_project"]):
-                continue
-            if not _compatible_ship_type(extraction.ship_type, row["ship_type"]):
-                continue
-            if not _series_can_match(extraction.series_identifier, row["series_identifier"]):
-                continue
-            if not _dates_near(article_date, _parse_date(row["latest_published_at"])):
-                continue
-            candidates.append(row)
+            incoming = {
+                "yard": extraction.yard,
+                "owner_project": extraction.owner_project,
+                "ship_type": extraction.ship_type,
+                "series_identifier": extraction.series_identifier,
+                "latest_published_at": iso_date(article_date),
+            }
+            if records_are_near_duplicates(incoming, row):
+                candidates.append(row)
         return candidates
 
     def merge(self, article_id: int, extraction: Extraction) -> int | None:

@@ -316,20 +316,37 @@ class HybridExtractor:
         if not rules.relevant or not self.llm:
             return rules
         try:
-            result = self.llm.extract(**kwargs)
-            if not result.relevant:
-                return result
-            start_milestones = [item for item in result.milestones if item.kind == "start"]
-            if not start_milestones:
-                return Extraction(relevant=False, confidence=0.9, review_status="无关", review_reason="未提取到新开工证据")
-            result.current_progress = "开工"
-            result.start_date = start_milestones[0].event_date
-            result.completion_date = None
-            result.milestones = start_milestones
-            return result
+            return self._start_only(self.llm.extract(**kwargs))
         except Exception as exc:
             rules.review_reason = "；".join(
                 item for item in (rules.review_reason, f"模型抽取失败，已使用规则结果：{exc}") if item
             )
             rules.confidence = min(rules.confidence, 0.6)
             return rules
+
+    def reclassify(self, **kwargs) -> Extraction:
+        """Classify every historical record, including ones rejected by the fast rules."""
+        rules = self.rules.extract(**kwargs)
+        if not self.llm:
+            return rules
+        try:
+            return self._start_only(self.llm.extract(**kwargs))
+        except Exception as exc:
+            rules.review_reason = "；".join(
+                item for item in (rules.review_reason, f"模型复核失败，已使用规则结果：{exc}") if item
+            )
+            rules.confidence = min(rules.confidence, 0.6)
+            return rules
+
+    @staticmethod
+    def _start_only(result: Extraction) -> Extraction:
+        if not result.relevant:
+            return result
+        start_milestones = [item for item in result.milestones if item.kind == "start"]
+        if not start_milestones:
+            return Extraction(relevant=False, confidence=0.9, review_status="无关", review_reason="未提取到新开工证据")
+        result.current_progress = "开工"
+        result.start_date = start_milestones[0].event_date
+        result.completion_date = None
+        result.milestones = start_milestones
+        return result

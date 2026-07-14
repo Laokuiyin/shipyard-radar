@@ -12,7 +12,7 @@ from shipwatch.domain import ArticleCandidate
 from shipwatch.exporter import ExcelExporter, daily_output_path
 from shipwatch.extract import HybridExtractor
 from shipwatch.fetch import Fetcher
-from shipwatch.merge import ProjectMerger
+from shipwatch.merge import ProjectMerger, records_are_near_duplicates, review_status_for
 
 logger = logging.getLogger(__name__)
 
@@ -165,6 +165,76 @@ class Pipeline:
         finally:
             fetcher.close()
         return result
+
+    def reclassify_projects(self, limit: int | None = None) -> dict[str, int]:
+        """Refresh source text and assign one of the four review states to every project."""
+        fetcher = Fetcher(
+            self.settings.app.user_agent,
+            self.settings.app.request_timeout_seconds,
+            self.settings.app.request_delay_seconds,
+        )
+        collector = Collector(self.settings, self.db, fetcher, dajiala_api_key=self.settings.dajiala_api_key)
+        extractor = HybridExtractor(self.settings)
+        result = {"selected": 0, "refreshed": 0, "confirmed": 0, "review": 0, "irrelevant": 0, "errors": 0}
+        try:
+            for source_row in self.db.project_review_rows(limit):
+                result["selected"] += 1
+                try:
+                    row = source_row
+                    article_id = int(source_row["article_id"])
+                    if row["channel"] == "微信公众号":
+                        article_id = collector.collect(self._candidate_from_row(row), refresh=True)
+                        row = self.db.article_by_id(article_id)
+                        if not row or row["fetch_status"] != "ok":
+                            raise RuntimeError("纯文本正文获取失败")
+                        result["refreshed"] += 1
+                    published = date.fromisoformat(row["published_at"]) if row["published_at"] else None
+                    extraction = extractor.reclassify(
+                        title=row["title"],
+                        content=row["content"],
+                        yard_hint=row["yard_hint"],
+                        published_at=published,
+                    )
+                    self.db.mark_extracted(article_id, extraction)
+                    status = review_status_for(extraction)
+                    self.db.update_project_review(
+                        int(source_row["id"]), status, extraction.confidence, extraction.review_reason
+                    )
+                    if status == "已确认":
+                        result["confirmed"] += 1
+                    elif status == "待复核":
+                        result["review"] += 1
+                    else:
+                        result["irrelevant"] += 1
+                except Exception:
+                    logger.exception("全量项目复核失败 project_id=%s", source_row["id"])
+                    result["errors"] += 1
+            duplicates = self._mark_possible_duplicates()
+            result["duplicates"] = duplicates
+            result["confirmed"] -= duplicates
+        finally:
+            fetcher.close()
+            if extractor.llm:
+                extractor.llm.client.close()
+        return result
+
+    def _mark_possible_duplicates(self) -> int:
+        """Keep the first confirmed record and flag later near matches as possible duplicates."""
+        confirmed = []
+        duplicates = 0
+        for row in self.db.duplicate_review_rows():
+            if row["review_status"] not in {"已确认", "待复核"}:
+                continue
+            duplicate_of = next(
+                (item for item in confirmed if records_are_near_duplicates(row, item)), None
+            )
+            if duplicate_of:
+                reason = f"可能重复：候选项目ID {duplicate_of['id']}"
+                self.db.update_project_review(int(row["id"]), "可能重复", float(row["confidence"]), reason)
+                duplicates += 1
+            elif row["review_status"] == "已确认":
+                confirmed.append(row)
+        return duplicates
 
     @staticmethod
     def _candidate_from_row(row) -> ArticleCandidate:
