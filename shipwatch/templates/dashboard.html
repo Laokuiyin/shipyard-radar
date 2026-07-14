@@ -3,10 +3,10 @@
 <section class="metrics">
   <article><span>历史项目总数</span><strong>{{ metrics.projects }}</strong></article>
   <article><span>新开工候选</span><strong>{{ metrics.start_candidates }}</strong></article>
-  <article><span>已确认</span><strong>{{ metrics.confirmed }}</strong></article>
-  <article><span>待复核</span><strong>{{ metrics.reviews }}</strong></article>
-  <article><span>可能重复</span><strong>{{ metrics.duplicates }}</strong></article>
-  <article><span>无关</span><strong>{{ metrics.irrelevant }}</strong></article>
+  <article><span>历史已确认</span><strong>{{ metrics.confirmed }}</strong></article>
+  <article><span>历史待复核</span><strong>{{ metrics.reviews }}</strong></article>
+  <article><span>历史可能重复</span><strong>{{ metrics.duplicates }}</strong></article>
+  <article><span>历史无关</span><strong>{{ metrics.irrelevant }}</strong></article>
   <article class="{{ 'warn' if metrics.source_errors else '' }}"><span>来源异常</span><strong>{{ metrics.source_errors }}</strong></article>
 </section>
 

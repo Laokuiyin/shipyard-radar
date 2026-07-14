@@ -526,6 +526,8 @@ class Database:
         # remain in the database for traceability, but must not appear in it.
         conditions = ["p.current_progress='开工'"]
         params: list[object] = []
+        if not review_status:
+            conditions.append("COALESCE(p.review_status, '待复核')!='无关'")
         if yard:
             conditions.append("p.yard=?")
             params.append(yard)

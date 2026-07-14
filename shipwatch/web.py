@@ -133,6 +133,7 @@ def _project_count(
     review_status: str | None = None,
     start_only: bool = False,
     wechat_only: bool = False,
+    exclude_irrelevant: bool = False,
 ) -> int:
     params: tuple[object, ...] = ()
     status_filter = ""
@@ -140,6 +141,7 @@ def _project_count(
         status_filter = " AND p.review_status=?"
         params = (review_status,)
     start_filter = " AND p.current_progress='开工'" if start_only else ""
+    irrelevant_filter = " AND p.review_status!='无关'" if exclude_irrelevant else ""
     source_filter = """
         AND EXISTS (
           SELECT 1
@@ -151,7 +153,7 @@ def _project_count(
     return db.scalar(
         f"""
         SELECT COUNT(*) FROM projects p
-        WHERE 1=1{source_filter}{start_filter}{status_filter}
+        WHERE 1=1{source_filter}{start_filter}{irrelevant_filter}{status_filter}
         """,
         params,
     ) or 0
@@ -190,13 +192,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         request: Request,
         yard: str = "",
         progress: str = "",
-        review_status: str = "已确认",
+        review_status: str = "",
         q: str = "",
     ):
         projects = db.project_rows(yard or None, progress or None, review_status or None, q or None)
         metrics = {
             "projects": _project_count(db),
-            "start_candidates": _project_count(db, start_only=True, wechat_only=True),
+            "start_candidates": _project_count(
+                db, start_only=True, wechat_only=True, exclude_irrelevant=True
+            ),
             "confirmed": _project_count(db, "已确认"),
             "reviews": _project_count(db, "待复核"),
             "duplicates": _project_count(db, "可能重复"),
