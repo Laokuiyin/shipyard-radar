@@ -319,6 +319,40 @@ class Database:
                 )
             )
 
+    def article_by_id(self, article_id: int) -> sqlite3.Row | None:
+        rows = self.query("SELECT * FROM articles WHERE id=?", (article_id,))
+        return rows[0] if rows else None
+
+    def start_project_articles(self, limit: int | None = None) -> list[sqlite3.Row]:
+        """Wechat source articles for records previously classified as starts."""
+        sql = """
+            SELECT DISTINCT a.*
+            FROM articles a
+            JOIN project_sources ps ON ps.article_id=a.id
+            JOIN projects p ON p.id=ps.project_id
+            WHERE p.current_progress='开工' AND a.channel='微信公众号'
+            ORDER BY COALESCE(a.published_at_ts, a.published_at, a.fetched_at), a.id
+        """
+        if limit:
+            sql += " LIMIT ?"
+            return self.query(sql, (limit,))
+        return self.query(sql)
+
+    def mark_start_projects_irrelevant(self, article_id: int, reason: str | None) -> None:
+        """Hide stale start candidates when their source fails the stricter re-check."""
+        with self.connect() as conn:
+            conn.execute(
+                """
+                UPDATE projects
+                SET review_status='无关', review_reason=COALESCE(?, review_reason),
+                    last_changed_at=CURRENT_TIMESTAMP
+                WHERE current_progress='开工' AND id IN (
+                    SELECT project_id FROM project_sources WHERE article_id=?
+                )
+                """,
+                (reason, article_id),
+            )
+
     def mark_extracted(self, article_id: int, extraction: Extraction) -> None:
         payload = {
             "relevant": extraction.relevant,

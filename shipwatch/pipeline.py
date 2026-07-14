@@ -125,6 +125,47 @@ class Pipeline:
                 self.db.mark_extraction_error(row["id"], str(exc))
         return {"processed": processed, "relevant": relevant}
 
+    def reprocess_start_projects(self, limit: int | None = None) -> dict[str, int]:
+        """Refresh and re-extract the legacy WeChat articles previously marked 开工."""
+        fetcher = Fetcher(
+            self.settings.app.user_agent,
+            self.settings.app.request_timeout_seconds,
+            self.settings.app.request_delay_seconds,
+        )
+        collector = Collector(self.settings, self.db, fetcher, dajiala_api_key=self.settings.dajiala_api_key)
+        extractor = HybridExtractor(self.settings)
+        merger = ProjectMerger(self.db)
+        result = {"selected": 0, "refreshed": 0, "relevant": 0, "irrelevant": 0, "errors": 0}
+        try:
+            for source_row in self.db.start_project_articles(limit):
+                result["selected"] += 1
+                try:
+                    article_id = collector.collect(self._candidate_from_row(source_row), refresh=True)
+                    row = self.db.article_by_id(article_id)
+                    if not row or row["fetch_status"] != "ok":
+                        raise RuntimeError("纯文本正文获取失败")
+                    result["refreshed"] += 1
+                    published = date.fromisoformat(row["published_at"]) if row["published_at"] else None
+                    extraction = extractor.extract(
+                        title=row["title"],
+                        content=row["content"],
+                        yard_hint=row["yard_hint"],
+                        published_at=published,
+                    )
+                    self.db.mark_extracted(article_id, extraction)
+                    if extraction.relevant:
+                        merger.merge(article_id, extraction)
+                        result["relevant"] += 1
+                    else:
+                        self.db.mark_start_projects_irrelevant(article_id, extraction.review_reason)
+                        result["irrelevant"] += 1
+                except Exception:
+                    logger.exception("重跑开工记录失败 article_id=%s", source_row["id"])
+                    result["errors"] += 1
+        finally:
+            fetcher.close()
+        return result
+
     @staticmethod
     def _candidate_from_row(row) -> ArticleCandidate:
         published_ts = datetime.fromisoformat(row["published_at_ts"]) if row["published_at_ts"] else None

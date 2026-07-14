@@ -27,6 +27,8 @@ def build_parser() -> argparse.ArgumentParser:
     add.add_argument("--title", default="人工补充链接")
 
     sub.add_parser("extract", help="抽取待处理文章并合并项目")
+    reprocess_starts = sub.add_parser("reprocess-starts", help="用纯文本重跑历史开工公众号文章")
+    reprocess_starts.add_argument("--limit", type=int, help="最多重跑篇数")
     export = sub.add_parser("export", help="生成 Excel")
     export.add_argument("--output", type=Path)
     sub.add_parser("daily", help="执行每日采集、抽取与导出")
@@ -62,6 +64,8 @@ def main() -> None:
         print({"article_id": article_id})
     elif args.command == "extract":
         print(pipeline.extract_pending())
+    elif args.command == "reprocess-starts":
+        print(pipeline.reprocess_start_projects(args.limit))
     elif args.command == "export":
         print(pipeline.export(args.output))
     elif args.command == "daily":

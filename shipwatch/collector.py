@@ -30,7 +30,7 @@ class Collector:
         self.last_fetch_status: str | None = None
         self.last_fetch_error: str | None = None
 
-    def collect(self, candidate: ArticleCandidate) -> int:
+    def collect(self, candidate: ArticleCandidate, refresh: bool = False) -> int:
         now = datetime.now()
         self.last_fetch_status = None
         self.last_fetch_error = None
@@ -52,7 +52,7 @@ class Collector:
                     """,
                     (candidate.url,),
                 )
-                if existing:
+                if existing and not refresh:
                     row = existing[0]
                     title = row["title"] or candidate.title
                     content = row["content"] or ""

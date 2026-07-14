@@ -1,7 +1,8 @@
 {% extends "base.html" %}
 {% block content %}
 <section class="metrics">
-  <article><span>项目候选</span><strong>{{ metrics.projects }}</strong></article>
+  <article><span>历史项目总数</span><strong>{{ metrics.projects }}</strong></article>
+  <article><span>新开工候选</span><strong>{{ metrics.start_candidates }}</strong></article>
   <article><span>已确认</span><strong>{{ metrics.confirmed }}</strong></article>
   <article><span>待复核</span><strong>{{ metrics.reviews }}</strong></article>
   <article><span>可能重复</span><strong>{{ metrics.duplicates }}</strong></article>

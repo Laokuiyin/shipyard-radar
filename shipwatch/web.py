@@ -128,21 +128,30 @@ def _source_error_count(db: Database, settings: Settings) -> int:
     ) or 0
 
 
-def _project_count(db: Database, review_status: str | None = None) -> int:
+def _project_count(
+    db: Database,
+    review_status: str | None = None,
+    start_only: bool = False,
+    wechat_only: bool = False,
+) -> int:
     params: tuple[object, ...] = ()
     status_filter = ""
     if review_status:
         status_filter = " AND p.review_status=?"
         params = (review_status,)
-    return db.scalar(
-        f"""
-        SELECT COUNT(*) FROM projects p
-        WHERE p.current_progress='开工' AND EXISTS (
+    start_filter = " AND p.current_progress='开工'" if start_only else ""
+    source_filter = """
+        AND EXISTS (
           SELECT 1
           FROM project_sources ps
           JOIN articles a ON a.id=ps.article_id
           WHERE ps.project_id=p.id AND a.channel='微信公众号'
-        ){status_filter}
+        )
+    """ if wechat_only else ""
+    return db.scalar(
+        f"""
+        SELECT COUNT(*) FROM projects p
+        WHERE 1=1{source_filter}{start_filter}{status_filter}
         """,
         params,
     ) or 0
@@ -187,6 +196,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         projects = db.project_rows(yard or None, progress or None, review_status or None, q or None)
         metrics = {
             "projects": _project_count(db),
+            "start_candidates": _project_count(db, start_only=True, wechat_only=True),
             "confirmed": _project_count(db, "已确认"),
             "reviews": _project_count(db, "待复核"),
             "duplicates": _project_count(db, "可能重复"),
@@ -204,7 +214,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                         """
                         SELECT DISTINCT p.yard
                         FROM projects p
-                        WHERE p.current_progress='开工' AND EXISTS (
+                        WHERE EXISTS (
                           SELECT 1
                           FROM project_sources ps
                           JOIN articles a ON a.id=ps.article_id

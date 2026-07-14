@@ -45,6 +45,8 @@ def test_dashboard_and_health(tmp_path):
     assert dashboard.status_code == 200
     assert "测试船东" in dashboard.text
     assert "新船项目主表" in dashboard.text
+    assert "历史项目总数" in dashboard.text
+    assert "新开工候选" in dashboard.text
     assert 'class="mobile-list"' in dashboard.text
     assert 'class="mobile-card"' in dashboard.text
     assert 'href="/source-config"' not in dashboard.text
@@ -102,7 +104,7 @@ def test_dashboard_hides_website_only_projects(tmp_path):
 
     assert response.status_code == 200
     assert "历史官网船东" not in response.text
-    assert "<span>项目候选</span><strong>0</strong>" in response.text
+    assert "<span>历史项目总数</span><strong>1</strong>" in response.text
 
 
 def test_sources_open_link_uses_wechat_target_url(tmp_path):
