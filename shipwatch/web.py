@@ -64,7 +64,7 @@ def _generated_source_id(yard: str, account: str, existing_ids: set[str]) -> str
 
 
 def _progress_options(db: Database, yard: str = "", review_status: str = "", q: str = "") -> list[str]:
-    conditions = ["1=1"]
+    conditions = ["p.current_progress='开工'"]
     params: list[object] = []
     if yard:
         conditions.append("p.yard=?")
@@ -137,7 +137,7 @@ def _project_count(db: Database, review_status: str | None = None) -> int:
     return db.scalar(
         f"""
         SELECT COUNT(*) FROM projects p
-        WHERE EXISTS (
+        WHERE p.current_progress='开工' AND EXISTS (
           SELECT 1
           FROM project_sources ps
           JOIN articles a ON a.id=ps.article_id
@@ -204,7 +204,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                         """
                         SELECT DISTINCT p.yard
                         FROM projects p
-                        WHERE EXISTS (
+                        WHERE p.current_progress='开工' AND EXISTS (
                           SELECT 1
                           FROM project_sources ps
                           JOIN articles a ON a.id=ps.article_id
@@ -239,6 +239,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                    m.is_expected, m.evidence, a.title, a.url
             FROM milestones m JOIN projects p ON p.id=m.project_id
             JOIN articles a ON a.id=m.article_id
+            WHERE p.current_progress='开工' AND m.kind='start'
             ORDER BY COALESCE(m.event_date, a.published_at) DESC, m.id DESC
             """
         )

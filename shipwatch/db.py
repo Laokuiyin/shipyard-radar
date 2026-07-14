@@ -488,7 +488,9 @@ class Database:
         review_status: str | None = None,
         query: str | None = None,
     ) -> list[sqlite3.Row]:
-        conditions = ["1=1"]
+        # The product is a new-start register. Historical full-lifecycle rows may
+        # remain in the database for traceability, but must not appear in it.
+        conditions = ["p.current_progress='开工'"]
         params: list[object] = []
         if yard:
             conditions.append("p.yard=?")

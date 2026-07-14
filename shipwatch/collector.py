@@ -5,18 +5,21 @@ import logging
 from datetime import date, datetime
 from urllib.parse import urlsplit
 
+import httpx
+
 from shipwatch.config import Settings
 from shipwatch.db import Database
 from shipwatch.domain import Article, ArticleCandidate
 from shipwatch.fetch import Fetcher
-from shipwatch.parsers import extract_web_article, extract_wechat_article
-from shipwatch.text import normalize_url, sha256_text
+from shipwatch.parsers import extract_web_article, extract_wechat_article, soup
+from shipwatch.text import clean_text, normalize_url, sha256_text
 
 logger = logging.getLogger(__name__)
 
 
 class Collector:
-    DAJIALA_API_URL = "https://www.dajiala.com/fbmain/monitor/v3/article_html"
+    DAJIALA_TEXT_API_URL = "https://www.dajiala.com/fbmain/monitor/v3/article_detail"
+    DAJIALA_HTML_API_URL = "https://www.dajiala.com/fbmain/monitor/v3/article_html"
 
     def __init__(self, settings: Settings, db: Database, fetcher: Fetcher, dajiala_api_key: str | None = None):
         self.settings = settings
@@ -65,17 +68,37 @@ class Collector:
                         api_used = True
                 if not api_used:
                     try:
-                        title, content, published, published_ts, account, final_url = self._fetch_via_dajiala(
-                            candidate.url,
-                            source_id=candidate.source_id,
-                            account_name=candidate.account_name,
+                        title, content, published, published_ts, account, final_url = (
+                            self._fetch_text_via_dajiala(
+                                candidate.url,
+                                source_id=candidate.source_id,
+                                account_name=candidate.account_name,
+                            )
                         )
                         if not title:
                             title = candidate.title
                         if content:
                             api_used = True
                     except Exception as exc:
-                        logger.warning("打价啦 API 正文获取失败 %s: %s, 回退到直接抓取", candidate.url, exc)
+                        logger.warning("打价啦 API 纯文本获取失败 %s: %s, 回退到 HTML 接口", candidate.url, exc)
+                        try:
+                            title, content, published, published_ts, account, final_url = (
+                                self._fetch_html_via_dajiala(
+                                    candidate.url,
+                                    source_id=candidate.source_id,
+                                    account_name=candidate.account_name,
+                                )
+                            )
+                            if not title:
+                                title = candidate.title
+                            if content:
+                                api_used = True
+                        except Exception as html_exc:
+                            logger.warning(
+                                "打价啦 API HTML 获取失败 %s: %s, 回退到直接抓取",
+                                candidate.url,
+                                html_exc,
+                            )
 
             if not api_used:
                 response = self.fetcher.get(candidate.url)
@@ -151,26 +174,65 @@ class Collector:
         self.last_fetch_error = article.fetch_error
         return self.db.upsert_article(article)
 
-    def _fetch_via_dajiala(
+    def _article_url(self, article_url: str) -> str:
+        """Resolve the original WeChat URL from a captcha redirect."""
+        from urllib.parse import parse_qs, unquote, urlparse
+
+        parsed = urlparse(article_url)
+        if "appmsgcaptcha" not in parsed.path:
+            return article_url
+        target = parse_qs(parsed.query).get("target_url", [None])[0]
+        return unquote(target) if target else article_url
+
+    def _fetch_text_via_dajiala(
         self,
         article_url: str,
         source_id: str | None = None,
         account_name: str | None = None,
     ) -> tuple[str, str, date | None, datetime | None, str | None, str]:
-        """通过打价啦 API 获取文章正文 HTML，返回 (title, content, published, published_ts, account, final_url)"""
-        import httpx
-        from urllib.parse import urlparse, parse_qs, unquote
-        # 如果链接是验证码跳转，从中提取原始文章链接
-        parsed = urlparse(article_url)
-        if "appmsgcaptcha" in parsed.path:
-            qs = parse_qs(parsed.query)
-            target = qs.get("target_url", [None])[0]
-            if target:
-                article_url = unquote(target)
+        """Fetch clean article text from article_detail before trying HTML."""
+        article_url = self._article_url(article_url)
+        resp = None
+        try:
+            resp = httpx.get(
+                self.DAJIALA_TEXT_API_URL,
+                params={"url": article_url, "key": self.dajiala_api_key},
+                timeout=self.settings.app.request_timeout_seconds,
+            )
+            resp.raise_for_status()
+            data = resp.json()
+        except Exception as exc:
+            self.db.record_api_call(
+                "dajiala", "article_detail", source_id=source_id, account_name=account_name,
+                article_url=article_url, success=False,
+                status_code=resp.status_code if resp is not None else None, error=str(exc),
+            )
+            raise
+        self.db.record_api_call(
+            "dajiala", "article_detail", source_id=source_id, account_name=account_name,
+            article_url=article_url, success=data.get("code") == 0, status_code=resp.status_code,
+            error=None if data.get("code") == 0 else str(data.get("msg", data.get("msk", ""))),
+        )
+        if data.get("code") != 0:
+            raise RuntimeError(f"打价啦 API 返回异常: {data.get('msg', data.get('msk', ''))}")
+        article_data = data.get("data") or data
+        content = clean_text(article_data.get("content") or "")
+        if not content:
+            raise RuntimeError("打价啦 API 未返回纯文本正文")
+        return self._article_fields(article_data, content, article_url)
+
+    def _fetch_html_via_dajiala(
+        self,
+        article_url: str,
+        source_id: str | None = None,
+        account_name: str | None = None,
+    ) -> tuple[str, str, date | None, datetime | None, str | None, str]:
+        """Fallback for article_detail: fetch HTML and convert it to plain text."""
+        article_url = self._article_url(article_url)
         resp = None
         try:
             resp = httpx.post(
-                self.DAJIALA_API_URL,
+                self.DAJIALA_HTML_API_URL,
                 json={"url": article_url, "key": self.dajiala_api_key},
                 timeout=self.settings.app.request_timeout_seconds,
             )
@@ -201,30 +263,34 @@ class Collector:
         if data.get("code") != 0:
             raise RuntimeError(f"打价啦 API 返回异常: {data.get('msg', data.get('msk', ''))}")
         article_data = data.get("data") or {}
-        html_content = article_data.get("html") or ""
-        # Strip style tags, images, outer wrappers from wechat HTML
-        if html_content:
-            html_content = re.sub(r"<style[^>]*>.*?</style>", "", html_content, flags=re.DOTALL)
-            html_content = re.sub(r"<\?xml[^>]*\?>", "", html_content)
-            html_content = re.sub(r"</?html[^>]*>", "", html_content)
-            html_content = re.sub(r"</?head[^>]*>", "", html_content)
-            html_content = re.sub(r"<title>.*?</title>", "", html_content, flags=re.DOTALL)
-            html_content = re.sub(r"<meta[^>]*>", "", html_content)
-            html_content = re.sub(r"</?body[^>]*>", "", html_content)
-            html_content = re.sub(r"<img[^>]*>", "", html_content)
-            html_content = re.sub(r"<br\s*/?>", "", html_content)
-            html_content = re.sub(r"<p[^>]*>\s*</p>", "", html_content)
-            html_content = re.sub(r"<section[^>]*>\s*</section>", "", html_content)
-            html_content = html_content.strip()
+        html_content = article_data.get("html") or article_data.get("content_multi_text") or ""
+        content = self._plain_text_from_html(html_content)
+        if not content:
+            raise RuntimeError("打价啦 API 未返回可读 HTML 正文")
+        return self._article_fields(article_data, content, article_url)
+
+    @staticmethod
+    def _plain_text_from_html(html_content: str) -> str:
+        doc = soup(html_content)
+        for element in doc.select("script, style, img, svg, video, audio, noscript"):
+            element.decompose()
+        return clean_text(doc.get_text("\n", strip=True))
+
+    @staticmethod
+    def _article_fields(
+        article_data: dict,
+        content: str,
+        article_url: str,
+    ) -> tuple[str, str, date | None, datetime | None, str | None, str]:
         title = (article_data.get("title") or "").strip()
-        nickname = article_data.get("nickname") or None
-        post_time = article_data.get("post_time")
+        nickname = article_data.get("nickname") or article_data.get("nick_name") or None
+        post_time = article_data.get("post_time") or article_data.get("pubtime")
         published = None
         published_ts = None
         if post_time:
-            published_ts = datetime.fromtimestamp(post_time)
+            published_ts = datetime.fromtimestamp(int(post_time))
             published = published_ts.date()
-        return title, html_content.strip(), published, published_ts, nickname, article_url
+        return title, content, published, published_ts, nickname, article_url
     @staticmethod
     def _sogou_target(html: str) -> str | None:
         import re

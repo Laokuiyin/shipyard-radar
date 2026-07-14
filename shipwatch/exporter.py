@@ -68,7 +68,7 @@ class ExcelExporter:
             FROM projects p
             LEFT JOIN project_sources ps ON ps.project_id=p.id
             LEFT JOIN articles a ON a.id=ps.article_id
-            WHERE ps.article_id=(
+            WHERE p.current_progress='开工' AND ps.article_id=(
               SELECT MAX(ps2.article_id) FROM project_sources ps2 WHERE ps2.project_id=p.id
             )
             ORDER BY p.last_changed_at DESC
@@ -108,6 +108,7 @@ class ExcelExporter:
                    m.is_expected, m.evidence, a.title, a.url
             FROM milestones m JOIN projects p ON p.id=m.project_id
             JOIN articles a ON a.id=m.article_id
+            WHERE p.current_progress='开工' AND m.kind='start'
             ORDER BY COALESCE(m.event_date, a.published_at), m.id
             """
         )
