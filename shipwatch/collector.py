@@ -12,7 +12,7 @@ from shipwatch.db import Database
 from shipwatch.domain import Article, ArticleCandidate
 from shipwatch.fetch import Fetcher
 from shipwatch.parsers import extract_web_article, extract_wechat_article, soup
-from shipwatch.text import clean_text, normalize_url, sha256_text
+from shipwatch.text import clean_text, normalize_url, parse_date, sha256_text
 
 logger = logging.getLogger(__name__)
 
@@ -288,8 +288,15 @@ class Collector:
         published = None
         published_ts = None
         if post_time:
-            published_ts = datetime.fromtimestamp(int(post_time))
-            published = published_ts.date()
+            try:
+                published_ts = datetime.fromtimestamp(int(post_time))
+                published = published_ts.date()
+            except (TypeError, ValueError, OSError):
+                try:
+                    published_ts = datetime.fromisoformat(str(post_time))
+                    published = published_ts.date()
+                except ValueError:
+                    published = parse_date(str(post_time))
         return title, content, published, published_ts, nickname, article_url
     @staticmethod
     def _sogou_target(html: str) -> str | None:

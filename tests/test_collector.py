@@ -62,3 +62,13 @@ def test_html_fallback_removes_markup_and_images():
         "<style>body { color: red; }</style><p>船舶<strong>正式开工</strong></p><img src='x'><script>x()</script>"
     )
     assert "".join(content.split()) == "船舶正式开工"
+
+
+def test_article_detail_accepts_string_pubtime():
+    _, _, published, published_ts, _, _ = Collector._article_fields(
+        {"title": "新船开工", "content": "正文", "pubtime": "2026-07-11 17:28:19"},
+        "正文",
+        "https://mp.weixin.qq.com/s/test",
+    )
+    assert published == datetime(2026, 7, 11).date()
+    assert published_ts == datetime(2026, 7, 11, 17, 28, 19)
