@@ -571,9 +571,11 @@ class Database:
         review_status: str | None = None,
         query: str | None = None,
     ) -> list[sqlite3.Row]:
-        # The product is a new-start register. Historical full-lifecycle rows may
-        # remain in the database for traceability, but must not appear in it.
-        conditions = ["p.current_progress='开工'"]
+        # The review result is the authoritative new-start judgement.  Do not
+        # additionally limit by the legacy lifecycle field: a project may have
+        # since reached a later milestone, while its source article is still a
+        # valid new-start record.
+        conditions = ["1=1"]
         params: list[object] = []
         if not review_status:
             conditions.append("COALESCE(p.review_status, '待复核')!='无关'")
@@ -602,12 +604,16 @@ class Database:
                FROM milestones m WHERE m.project_id=p.id) AS milestones_text
             FROM projects p
             JOIN project_sources ps ON ps.project_id=p.id
-            JOIN articles a ON a.id=ps.article_id AND a.channel='微信公众号'
+            JOIN articles a ON a.id=ps.article_id
             WHERE ps.article_id=(
-              SELECT MAX(ps2.article_id)
+              SELECT a2.id
               FROM project_sources ps2
               JOIN articles a2 ON a2.id=ps2.article_id
-              WHERE ps2.project_id=p.id AND a2.channel='微信公众号'
+              WHERE ps2.project_id=p.id
+              ORDER BY CASE a2.channel WHEN '微信公众号' THEN 0 ELSE 1 END,
+                       COALESCE(a2.published_at_ts, a2.published_at, a2.fetched_at) DESC,
+                       a2.id DESC
+              LIMIT 1
             ) AND {" AND ".join(conditions)}
             ORDER BY
               CASE p.current_progress

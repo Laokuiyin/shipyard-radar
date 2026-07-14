@@ -64,7 +64,7 @@ def _generated_source_id(yard: str, account: str, existing_ids: set[str]) -> str
 
 
 def _progress_options(db: Database, yard: str = "", review_status: str = "", q: str = "") -> list[str]:
-    conditions = ["p.current_progress='开工'"]
+    conditions = ["1=1"]
     params: list[object] = []
     if yard:
         conditions.append("p.yard=?")
@@ -85,12 +85,16 @@ def _progress_options(db: Database, yard: str = "", review_status: str = "", q: 
         SELECT DISTINCT COALESCE(p.current_progress, '') AS progress
         FROM projects p
         JOIN project_sources ps ON ps.project_id=p.id
-        JOIN articles a ON a.id=ps.article_id AND a.channel='微信公众号'
+        JOIN articles a ON a.id=ps.article_id
         WHERE ps.article_id=(
-          SELECT MAX(ps2.article_id)
+          SELECT a2.id
           FROM project_sources ps2
           JOIN articles a2 ON a2.id=ps2.article_id
-          WHERE ps2.project_id=p.id AND a2.channel='微信公众号'
+          WHERE ps2.project_id=p.id
+          ORDER BY CASE a2.channel WHEN '微信公众号' THEN 0 ELSE 1 END,
+                   COALESCE(a2.published_at_ts, a2.published_at, a2.fetched_at) DESC,
+                   a2.id DESC
+          LIMIT 1
         ) AND {" AND ".join(conditions)}
         ORDER BY
           CASE p.current_progress
@@ -214,12 +218,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                         """
                         SELECT DISTINCT p.yard
                         FROM projects p
-                        WHERE EXISTS (
-                          SELECT 1
-                          FROM project_sources ps
-                          JOIN articles a ON a.id=ps.article_id
-                          WHERE ps.project_id=p.id AND a.channel='微信公众号'
-                        )
                         ORDER BY p.yard
                         """
                     )
