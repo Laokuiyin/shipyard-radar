@@ -108,6 +108,51 @@ def test_dashboard_shows_website_only_confirmed_projects(tmp_path):
     assert "<span>项目总数</span><strong>1</strong>" in response.text
 
 
+def test_dashboard_all_review_statuses_includes_irrelevant_projects(tmp_path):
+    settings = load_settings("config.yaml")
+    settings.db_path = tmp_path / "web.db"
+    db = Database(settings.db_path)
+    db.init()
+
+    merger = ProjectMerger(db)
+    for index, status in enumerate(["已确认", "待复核", "可能重复", "无关"], start=1):
+        article_id = db.upsert_article(
+            Article(
+                source_id="yard",
+                yard_hint="测试船厂",
+                channel="微信公众号",
+                title=f"{status}项目",
+                url=f"https://example.com/{index}",
+                content=f"{status}项目开工",
+                published_at=date(2026, 6, index),
+                fetched_at=datetime.now(),
+                content_hash=status,
+            )
+        )
+        merger.merge(
+            article_id,
+            Extraction(
+                relevant=True,
+                yard="测试船厂",
+                owner_project=f"{status}船东",
+                ship_type="集装箱船",
+                current_progress="开工",
+                confidence=0.95,
+                review_status=status,
+            ),
+        )
+
+    client = TestClient(create_app(settings))
+    all_statuses = client.get("/")
+    irrelevant_only = client.get("/?review_status=无关")
+
+    assert all_statuses.status_code == 200
+    assert "当前显示 4 条" in all_statuses.text
+    assert all(f"{status}船东" in all_statuses.text for status in ["已确认", "待复核", "可能重复", "无关"])
+    assert "当前显示 1 条" in irrelevant_only.text
+    assert "无关船东" in irrelevant_only.text
+
+
 def test_sources_open_link_uses_wechat_target_url(tmp_path):
     settings = load_settings("config.yaml")
     settings.db_path = tmp_path / "web.db"
