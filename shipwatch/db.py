@@ -577,8 +577,6 @@ class Database:
         # valid new-start record.
         conditions = ["1=1"]
         params: list[object] = []
-        if not review_status:
-            conditions.append("COALESCE(p.review_status, '待复核')!='无关'")
         if yard:
             conditions.append("p.yard=?")
             params.append(yard)
