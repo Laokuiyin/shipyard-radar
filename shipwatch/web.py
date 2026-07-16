@@ -196,9 +196,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         request: Request,
         yard: str = "",
         progress: str = "",
-        review_status: str = "",
+        review_status: str | None = None,
         q: str = "",
     ):
+        # Focus the register on reviewed, reliable projects by default. An
+        # explicitly empty query value (`?review_status=`) remains the user's
+        # way to request every review status.
+        if review_status is None:
+            review_status = "已确认"
         projects = db.project_rows(yard or None, progress or None, review_status or None, q or None)
         metrics = {
             "projects": _project_count(db),

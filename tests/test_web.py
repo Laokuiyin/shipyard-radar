@@ -143,7 +143,7 @@ def test_dashboard_all_review_statuses_includes_irrelevant_projects(tmp_path):
         )
 
     client = TestClient(create_app(settings))
-    all_statuses = client.get("/")
+    all_statuses = client.get("/?review_status=")
     irrelevant_only = client.get("/?review_status=无关")
 
     assert all_statuses.status_code == 200
@@ -234,7 +234,7 @@ def test_sources_hide_obsolete_wechat_captcha_duplicate(tmp_path):
     assert "真实原文记录" in ok_page.text
 
 
-def test_dashboard_defaults_to_non_irrelevant_projects_and_scopes_progress_options(tmp_path):
+def test_dashboard_defaults_to_confirmed_projects_and_scopes_progress_options(tmp_path):
     settings = load_settings("config.yaml")
     settings.db_path = tmp_path / "web.db"
     db = Database(settings.db_path)
@@ -292,15 +292,15 @@ def test_dashboard_defaults_to_non_irrelevant_projects_and_scopes_progress_optio
     page = TestClient(create_app(settings)).get("/")
 
     assert page.status_code == 200
-    assert "当前显示 2 条" in page.text
+    assert "当前显示 1 条" in page.text
     assert "确认船东" in page.text
-    assert "待复核船东" in page.text
+    assert "待复核船东" not in page.text
     assert "<span>已确认</span>" in page.text
     assert "<span>待复核</span>" in page.text
     assert "<span>可能重复</span>" in page.text
     assert "<span>无关</span>" in page.text
-    assert 'option value="已确认" selected' not in page.text
+    assert 'option value="已确认" selected' in page.text
     assert 'option value="可能重复"' in page.text
     assert 'option value="无关"' in page.text
     assert 'option value="开工"' in page.text
-    assert 'option value="命名"' in page.text
+    assert 'option value="命名"' not in page.text
