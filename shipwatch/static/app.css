@@ -26,7 +26,7 @@ main { width: min(1500px, 94vw); margin: 26px auto 48px; }
 .metrics .metric-total::after { background: var(--blue); }
 .metrics .metric-confirmed::after { background: #219653; }
 .metrics .metric-review::after { background: #e0a100; }
-.metrics .metric-duplicate::after { background: #e67e22; }
+.metrics .metric-duplicate::after { background: #7b61a8; }
 .metrics .metric-irrelevant::after { background: #8795a1; }
 .metrics span { display: block; color: var(--muted); font-size: 12px; font-weight: 700; }
 .metrics strong { display: block; margin-top: 2px; font: 800 30px/1.2 ui-monospace, SFMono-Regular, Menlo, monospace; }
