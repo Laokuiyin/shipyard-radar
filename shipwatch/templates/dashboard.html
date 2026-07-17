@@ -1,11 +1,11 @@
 {% extends "base.html" %}
 {% block content %}
 <section class="metrics">
-  <article><span>项目总数</span><strong>{{ metrics.projects }}</strong></article>
-  <article><span>已确认</span><strong>{{ metrics.confirmed }}</strong></article>
-  <article><span>待复核</span><strong>{{ metrics.reviews }}</strong></article>
-  <article><span>可能重复</span><strong>{{ metrics.duplicates }}</strong></article>
-  <article><span>无关</span><strong>{{ metrics.irrelevant }}</strong></article>
+  <article class="metric-total"><span>项目总数</span><strong>{{ metrics.projects }}</strong></article>
+  <article class="metric-confirmed"><span>已确认</span><strong>{{ metrics.confirmed }}</strong></article>
+  <article class="metric-review"><span>待复核</span><strong>{{ metrics.reviews }}</strong></article>
+  <article class="metric-duplicate"><span>可能重复</span><strong>{{ metrics.duplicates }}</strong></article>
+  <article class="metric-irrelevant"><span>无关</span><strong>{{ metrics.irrelevant }}</strong></article>
 </section>
 
 <section class="panel">
