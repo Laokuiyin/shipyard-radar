@@ -30,9 +30,9 @@ main { width: min(1500px, 94vw); margin: 26px auto 48px; }
 .metrics .metric-irrelevant::after { background: #8795a1; }
 .metrics span { display: block; color: var(--muted); font-size: 12px; font-weight: 700; }
 .metrics strong { display: block; margin-top: 2px; font: 800 30px/1.2 ui-monospace, SFMono-Regular, Menlo, monospace; }
-.data-freshness { display: flex; flex-wrap: wrap; gap: 8px 22px; margin: -6px 0 18px; padding: 10px 14px; color: #7a8994; background: #f7f9fa; border: 1px solid #e7edef; border-radius: 8px; font-size: 12px; }
+.data-freshness { display: flex; flex-wrap: wrap; gap: 8px 22px; margin: -2px 0 18px; padding: 4px 2px; color: #8a98a2; background: transparent; border: 0; border-radius: 0; font-size: 12px; }
 .data-freshness span { display: flex; gap: 7px; align-items: center; }
-.data-freshness strong { color: #62737f; font-size: 12px; }
+.data-freshness strong { color: #778691; font-size: 12px; }
 .panel { background: white; border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 10px 28px #14344c0c; overflow: hidden; }
 .panel-head { display: flex; align-items: center; justify-content: space-between; padding: 20px 22px 14px; }
 .panel h2 { margin: 0; font-size: 20px; }
