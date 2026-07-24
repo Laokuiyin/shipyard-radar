@@ -27,6 +27,11 @@ def _status_label(last_error: str | None, result_count: int | None) -> str:
         return "失败"
     return "成功"
 
+
+def _display_timestamp(value: str | None) -> str:
+    """Render ISO-like database timestamps consistently in the dashboard."""
+    return value.replace("T", " ")[:16] if value else "暂无"
+
 def _failure_reason(value: str | None) -> str | None:
     if not value:
         return None
@@ -212,11 +217,23 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "duplicates": _project_count(db, "可能重复"),
             "irrelevant": _project_count(db, "无关"),
         }
+        freshness = {
+            "latest_collection": _display_timestamp(
+                db.scalar("SELECT MAX(fetched_at) FROM articles")
+            ),
+            "latest_project": _display_timestamp(
+                db.scalar("SELECT MAX(last_changed_at) FROM projects")
+            ),
+            "pending_articles": db.scalar(
+                "SELECT COUNT(*) FROM articles WHERE extraction_status='pending'"
+            ) or 0,
+        }
         context = base_context(request, "projects")
         context.update(
             {
                 "projects": projects,
                 "metrics": metrics,
+                "freshness": freshness,
                 "yards": [
                     row[0]
                     for row in db.query(

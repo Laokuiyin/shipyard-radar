@@ -30,6 +30,9 @@ main { width: min(1500px, 94vw); margin: 26px auto 48px; }
 .metrics .metric-irrelevant::after { background: #8795a1; }
 .metrics span { display: block; color: var(--muted); font-size: 12px; font-weight: 700; }
 .metrics strong { display: block; margin-top: 2px; font: 800 30px/1.2 ui-monospace, SFMono-Regular, Menlo, monospace; }
+.data-freshness { display: flex; flex-wrap: wrap; gap: 8px 22px; margin: -6px 0 18px; padding: 10px 14px; color: var(--muted); background: #eaf2f5; border: 1px solid #d6e4e9; border-radius: 8px; font-size: 12px; }
+.data-freshness span { display: flex; gap: 7px; align-items: center; }
+.data-freshness strong { color: var(--ink); font-size: 12px; }
 .panel { background: white; border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 10px 28px #14344c0c; overflow: hidden; }
 .panel-head { display: flex; align-items: center; justify-content: space-between; padding: 20px 22px 14px; }
 .panel h2 { margin: 0; font-size: 20px; }
@@ -111,6 +114,8 @@ footer { padding: 24px; color: var(--muted); text-align: center; font-size: 12px
   main { width: 96vw; margin-top: 12px; }
   .topbar { padding: 20px 4vw; }
   .panel-head { align-items: flex-start; flex-direction: column; gap: 6px; padding: 16px; }
+  .data-freshness { gap: 6px; margin-top: -4px; }
+  .data-freshness span { width: 100%; }
   .filters { padding: 12px 16px 16px; }
   button, .button { width: 100%; text-align: center; }
 }
