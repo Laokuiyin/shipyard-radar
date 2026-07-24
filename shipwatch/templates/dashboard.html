@@ -7,6 +7,11 @@
   <article class="metric-duplicate"><span>可能重复</span><strong>{{ metrics.duplicates }}</strong></article>
   <article class="metric-irrelevant"><span>无关</span><strong>{{ metrics.irrelevant }}</strong></article>
 </section>
+<aside class="data-freshness" aria-label="数据更新状态">
+  <span><strong>最近采集</strong>{{ freshness.latest_collection }}</span>
+  <span><strong>最近项目更新</strong>{{ freshness.latest_project }}</span>
+  <span><strong>待处理文章</strong>{{ freshness.pending_articles }} 篇</span>
+</aside>
 
 <section class="panel">
   <div class="panel-head">

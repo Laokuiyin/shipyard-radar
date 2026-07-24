@@ -46,6 +46,9 @@ def test_dashboard_and_health(tmp_path):
     assert "测试船东" in dashboard.text
     assert "新船项目主表" in dashboard.text
     assert "项目总数" in dashboard.text
+    assert "最近采集" in dashboard.text
+    assert "最近项目更新" in dashboard.text
+    assert "待处理文章" in dashboard.text
     assert "已确认" in dashboard.text
     assert 'class="mobile-list"' in dashboard.text
     assert 'class="mobile-card"' in dashboard.text
